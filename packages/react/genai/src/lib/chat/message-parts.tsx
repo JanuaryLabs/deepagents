@@ -1,7 +1,10 @@
 import { Attachment } from '@zukhruf/shadcn';
 import type { Citation, ToolUIPart } from 'ai';
 import { cn } from 'cn';
+import type { Nodes, PhrasingContent, Root } from 'mdast';
 import { createContext, use, useMemo } from 'react';
+import { defaultRemarkPlugins } from 'streamdown';
+import { CONTINUE, SKIP, visit } from 'unist-util-visit';
 
 import { CitationPill } from '../components/CitationPill.tsx';
 import {
@@ -161,6 +164,139 @@ const CITATION_ELEMENT: GenAIInteractiveElement = {
   component: CitationAt,
 };
 
+// A pill is an atomic inline, so the browser may break the line on either side
+// of it: the period after it then starts the next line alone, or the pill
+// starts a line cut from its word (#6206). As footnote marks are set, the word
+// before the pills of one place, the pills and the closing punctuation right
+// after them form one group that does not wrap. A group cannot break even where
+// overflow-wrap would, so a word longer than GLUED_WORD_LIMIT UTF-16 units stays
+// out: 16 of the widest glyphs (CJK, Cyrillic capitals, about 14px each) and
+// three pills come to 285px, inside a 320px column's 296px. The group is made
+// in the markdown tree, not in the text, so streamdown's text-direction count
+// sees no more tag letters.
+const CITATION_GROUP_TAG = 'genai-citation-group';
+const CLOSING_PUNCTUATION = /^[.,;:!?)\]»،؛؟۔]+/u;
+const LAST_WORD = /\S+$/u;
+const GLUED_WORD_LIMIT = 16;
+
+interface CitationGroupNode {
+  type: 'citationGroup';
+  data: { hName: string };
+  children: PhrasingContent[];
+}
+
+declare module 'mdast' {
+  interface PhrasingContentMap {
+    citationGroup: CitationGroupNode;
+  }
+
+  interface RootContentMap {
+    citationGroup: CitationGroupNode;
+  }
+}
+
+// The inline html nodes normalizeStreamdownChildren makes of one citation tag
+// in a sentence: <span><genai-citation citation="n"></genai-citation></span>.
+const CITATION_HTML = [
+  /^<span>$/,
+  new RegExp(`^<${CITATION_TAG}\\s[^>]*>$`),
+  new RegExp(`^</${CITATION_TAG}>$`),
+  /^<\/span>$/,
+];
+
+function isCitationAt(
+  children: readonly PhrasingContent[],
+  at: number,
+): boolean {
+  return CITATION_HTML.every((pattern, offset) => {
+    const node = children[at + offset];
+    return node?.type === 'html' && pattern.test(node.value);
+  });
+}
+
+// The nodes whose children are sentence text, where a citation tag can sit.
+function phrasingChildrenOf(node: Nodes): PhrasingContent[] | undefined {
+  switch (node.type) {
+    case 'paragraph':
+    case 'heading':
+    case 'tableCell':
+    case 'emphasis':
+    case 'strong':
+    case 'delete':
+    case 'link':
+    case 'linkReference':
+      return node.children;
+    default:
+      return undefined;
+  }
+}
+
+function groupCitationRuns(children: PhrasingContent[]) {
+  for (let at = 0; at < children.length; at++) {
+    let end = at;
+    while (isCitationAt(children, end)) end += CITATION_HTML.length;
+    if (end === at) continue;
+    const grouped = children.slice(at, end);
+    const previous = children[at - 1];
+    const word =
+      previous?.type === 'text'
+        ? LAST_WORD.exec(previous.value)?.[0]
+        : undefined;
+    if (previous?.type === 'text' && word && word.length <= GLUED_WORD_LIMIT) {
+      grouped.unshift({ type: 'text', value: word });
+      previous.value = previous.value.slice(0, -word.length);
+      if (!previous.value) at--;
+    }
+    const next = children[end];
+    const punctuation =
+      next?.type === 'text'
+        ? CLOSING_PUNCTUATION.exec(next.value)?.[0]
+        : undefined;
+    if (next?.type === 'text' && punctuation) {
+      grouped.push({ type: 'text', value: punctuation });
+      next.value = next.value.slice(punctuation.length);
+      if (!next.value) end++;
+    }
+    // Inside a bare <span>, as the normalizer places an inline element, so
+    // MarkdownParagraph keeps the sentence a <p>.
+    children.splice(at, end - at, {
+      type: 'citationGroup',
+      data: { hName: 'span' },
+      children: [
+        {
+          type: 'citationGroup',
+          data: { hName: CITATION_GROUP_TAG },
+          children: grouped,
+        },
+      ],
+    });
+  }
+}
+
+function groupCitations() {
+  return (tree: Root) => {
+    visit(tree, (node) => {
+      if (node.type === 'citationGroup') return SKIP;
+      const children = phrasingChildrenOf(node);
+      if (children) groupCitationRuns(children);
+      return CONTINUE;
+    });
+  };
+}
+
+const CITATION_REMARK_PLUGINS = [
+  ...Object.values(defaultRemarkPlugins),
+  groupCitations,
+];
+
+const CITATION_GROUP_ELEMENT: GenAIInteractiveElement = {
+  name: CITATION_GROUP_TAG,
+  allowedAttributes: [],
+  component: ({ children }) => (
+    <span className="whitespace-nowrap">{children}</span>
+  ),
+};
+
 export function AssistantTextPart({
   text,
   citations,
@@ -188,7 +324,10 @@ export function AssistantTextPart({
   );
   const hasCitations = urlCitations.length > 0;
   const withCitations = useMemo(
-    () => (hasCitations ? [...(elements ?? []), CITATION_ELEMENT] : elements),
+    () =>
+      hasCitations
+        ? [...(elements ?? []), CITATION_ELEMENT, CITATION_GROUP_ELEMENT]
+        : elements,
     [hasCitations, elements],
   );
 
@@ -197,6 +336,7 @@ export function AssistantTextPart({
       <div className={cn('text-sm', className)}>
         <InteractiveResponse
           elements={withCitations}
+          remarkPlugins={hasCitations ? CITATION_REMARK_PLUGINS : undefined}
           animated={SLIDE_UP_ANIMATED}
           isAnimating={!isSnapshotRender && status === 'streaming'}
         >

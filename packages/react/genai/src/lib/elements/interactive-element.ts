@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import type { ExtraProps } from 'streamdown';
 
 import type { ElementDescriptor } from '@deepagents/elements';
@@ -17,8 +17,11 @@ export type ToolTip = {
 export interface GenAIInteractiveElement extends ElementDescriptor {
   /**
    * Receives the element's markdown attributes as streamdown passes them:
-   * untyped, so the component narrows each one it reads.
+   * untyped, so the component narrows each one it reads. A paired element's
+   * content arrives as rendered `children`.
    */
-  component: ComponentType<Record<string, unknown> & ExtraProps>;
+  component: ComponentType<
+    Record<string, unknown> & ExtraProps & { children?: ReactNode }
+  >;
   tips?: ToolTip[];
 }

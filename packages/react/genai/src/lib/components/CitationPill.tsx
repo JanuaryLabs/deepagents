@@ -30,7 +30,7 @@ export function CitationPill({
   const site = URL.parse(source.url)?.hostname ?? source.url;
   const description = source.description ?? (source.title ? site : undefined);
   return (
-    <sup className="ml-0.5 inline-block">
+    <sup className="ms-0.5 inline-block">
       <Popover>
         <PopoverTrigger
           openOnHover
