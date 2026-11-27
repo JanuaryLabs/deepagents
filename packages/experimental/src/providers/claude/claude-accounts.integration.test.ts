@@ -1,5 +1,6 @@
 import { createClock } from '@sinonjs/fake-timers';
 import { untilAborted } from '@zukhruf/async';
+import { waitFor } from '@zukhruf/testing/async';
 import { Msw } from '@zukhruf/testing/msw';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { generateText } from 'ai';
@@ -392,6 +393,62 @@ test('a revoked refresh token disconnects the account and reports it', async () 
     status: 'unauthenticated',
   });
   assert.deepStrictEqual(changes.at(-1), { status: 'unauthenticated' });
+});
+
+test('a revoked refresh token fails the request only after reporting the disconnect', async (t) => {
+  await using db = await testPostgres.database();
+  const pool = db.pool();
+  const changes: ClaudeConnectionState[] = [];
+  const accounts = createClaudeAccounts({
+    clock: createClock(),
+    store: await PostgresAccountStore.create({ pool }),
+    onChange: (_owner, state) => changes.push(state),
+  });
+  // Another session holds the sign-in table, so reading the state to report waits.
+  const reader = await pool.connect();
+  try {
+    await using _wire = interceptWire(async (request) => {
+      if (
+        request.url === TOKEN_URL &&
+        request.body?.grant_type === 'authorization_code'
+      ) {
+        return tokens('access-1', 'refresh-1', { expires_in: 30 });
+      }
+      if (request.url === TOKEN_URL) {
+        await reader.query(
+          'BEGIN; LOCK TABLE provider_account_sign_ins IN ACCESS EXCLUSIVE MODE',
+        );
+        return Response.json({ error: 'invalid_grant' }, { status: 400 });
+      }
+      return unexpected();
+    });
+    await signIn(accounts, 'owner-a');
+
+    const failing = ask(accounts, 'owner-a').catch((error) => error);
+    await waitFor(
+      async () => {
+        const waiting = await pool.query(
+          `SELECT 1 FROM pg_locks
+           WHERE relation = 'provider_account_sign_ins'::regclass AND NOT granted`,
+        );
+        assert.equal(waiting.rowCount, 1);
+      },
+      { signal: t.signal },
+    );
+    const settledWhileReportWaits = await Promise.race([
+      failing.then(() => true),
+      sleep(1_000).then(() => false),
+    ]);
+    await reader.query('COMMIT');
+    const failure = await failing;
+
+    assert.equal(settledWhileReportWaits, false);
+    assert.ok(failure instanceof ClaudeAuthError);
+    assert.equal(failure.code, 'refresh-token-invalid');
+    assert.deepStrictEqual(changes.at(-1), { status: 'unauthenticated' });
+  } finally {
+    reader.release();
+  }
 });
 
 test('a failed refresh keeps the account and hides the token endpoint body', async () => {

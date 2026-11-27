@@ -99,7 +99,7 @@ export function createCodexAccounts(options: CodexAccountsOptions) {
         'refresh-failed',
         'The ChatGPT connection changed repeatedly during refresh. Retry the request.',
       ),
-    onRevoked: (owner) => void publish(owner),
+    onRevoked: publish,
   });
 
   function authorizedFetch(owner: string): typeof globalThis.fetch {

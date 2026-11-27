@@ -123,7 +123,7 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
         'refresh-failed',
         'The Claude connection changed repeatedly during refresh. Retry the request.',
       ),
-    onRevoked: (owner) => void publish(owner),
+    onRevoked: publish,
   });
 
   function authorizedFetch(owner: string): typeof globalThis.fetch {

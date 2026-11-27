@@ -23,7 +23,8 @@ export function createTokenResolver<
   notConnected(): Error;
   revoked(): Error;
   conflicted(): Error;
-  onRevoked(owner: string): void;
+  /** Reports the disconnect; the request fails once the report settles. */
+  onRevoked(owner: string): Promise<unknown>;
 }) {
   const { store, provider } = options;
   const read = async (owner: string) =>
@@ -40,27 +41,30 @@ export function createTokenResolver<
     const current = await read(owner);
     if (!current) throw options.notConnected();
     if (usable(current)) return current;
-    return store.exclusive(
+    const outcome = await store.exclusive(
       provider,
       owner,
-      async (lease) => {
+      async (lease): Promise<RefreshResult<T>> => {
         for (let attempt = 0; attempt < 3; attempt++) {
           signal?.throwIfAborted();
           const tokens = await read(owner);
           if (!tokens) throw options.notConnected();
-          if (usable(tokens)) return tokens;
+          if (usable(tokens)) return { status: 'refreshed', tokens };
           const result = await options.refresh(tokens, lease.signal);
           if (result.status === 'revoked') {
-            if (!(await lease.write(null))) continue;
-            options.onRevoked(owner);
-            throw options.revoked();
+            if (await lease.write(null)) return result;
+            continue;
           }
-          if (await lease.write(result.tokens)) return result.tokens;
+          if (await lease.write(result.tokens)) return result;
         }
         throw options.conflicted();
       },
       signal,
     );
+    if (outcome.status === 'refreshed') return outcome.tokens;
+    // After the lock: reading the state to report can take the owner's lock.
+    await options.onRevoked(owner);
+    throw options.revoked();
   }
 
   return {
