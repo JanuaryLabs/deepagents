@@ -84,9 +84,12 @@ export async function loader(args: LoaderFunctionArgs) {
       ...runtime,
       chatId,
       conversation,
-      initialMessages: await validateUIMessages({
-        messages: body.data.messages,
-      }),
+      // The AI SDK rejects an empty list, and a session's read is empty until
+      // its first visible message.
+      initialMessages:
+        body.data.messages.length === 0
+          ? []
+          : await validateUIMessages({ messages: body.data.messages }),
       sessionExists: true,
       sessionError: false,
     };
