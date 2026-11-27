@@ -28,6 +28,13 @@ const SHUTDOWN_POLL_INTERVAL_MS = 50;
  */
 type Interrupted = 'recorded' | 'dropped' | 'running' | 'cancelled' | 'none';
 
+/**
+ * What a cancel left: a turn that has exited (or never ran), or one still
+ * stopping at the end of the 10 s wait, whose worker has yet to let go.
+ */
+export type TurnCancellation =
+  { state: 'exited' } | { state: 'stopping'; turnId: string };
+
 export interface TurnInterruptionOptions {
   storage: Pick<AgentStorage, 'admit'>;
   streams: StreamManager;
@@ -72,18 +79,22 @@ export class TurnInterruption {
   /**
    * Interrupts `turnId` and resolves once it has exited, waiting at most
    * 10 s for a running one, as Codex answers `turn/interrupt` only on
-   * `TurnAborted`.
+   * `TurnAborted`; a turn still running then resolves as stopping.
    */
-  async interrupt(conversation: ConversationId, turnId: string): Promise<void> {
+  async interrupt(
+    conversation: ConversationId,
+    turnId: string,
+  ): Promise<TurnCancellation> {
     const head = await this.#queue.getCurrentTurn(conversation);
     const interrupted = await this.#interrupt(conversation, turnId, head);
-    if (interrupted === 'none') return;
-    await this.#awaitTurnExit(
+    if (interrupted === 'none') return { state: 'exited' };
+    const cancellation = await this.#awaitTurnExit(
       conversation,
       turnId,
       performance.now() + SHUTDOWN_TIMEOUT_MS,
     );
     await this.#publish(conversation);
+    return cancellation;
   }
 
   /**
@@ -149,14 +160,15 @@ export class TurnInterruption {
     conversation: ConversationId,
     turnId: string,
     deadline: number,
-  ): Promise<void> {
+  ): Promise<TurnCancellation> {
     while (
       (await this.#queue.getCurrentTurn(conversation))?.streamId === turnId
     ) {
       const remaining = deadline - performance.now();
-      if (remaining <= 0) return;
+      if (remaining <= 0) return { state: 'stopping', turnId };
       await delay(Math.min(SHUTDOWN_POLL_INTERVAL_MS, remaining));
     }
+    return { state: 'exited' };
   }
 
   async #interrupt(

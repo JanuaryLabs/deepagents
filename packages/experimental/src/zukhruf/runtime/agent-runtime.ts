@@ -52,8 +52,14 @@ import {
 import { PluginManager } from './plugin/plugin-manager.ts';
 import { SandboxIdleStop } from './sandbox-idle-stop.ts';
 import { type SessionRead, projectSession } from './session-read.ts';
-import { SHUTDOWN_TIMEOUT_MS, TurnInterruption } from './turn-interruption.ts';
+import {
+  SHUTDOWN_TIMEOUT_MS,
+  type TurnCancellation,
+  TurnInterruption,
+} from './turn-interruption.ts';
 import { TurnSettlement } from './turn-settlement.ts';
+
+export type { TurnCancellation } from './turn-interruption.ts';
 
 const STREAM_STATUSES: readonly StreamStatus[] = [
   'queued',
@@ -375,15 +381,16 @@ export class AgentObservation {
   /**
    * Interrupts the turn, by default the current one, as Codex's
    * `turn/interrupt` does, and resolves once it has exited, waiting at most
-   * 10 s for a running one. A lone queued question is kept with the
-   * `<turn_aborted>` marker; a turn queued behind another is dropped.
+   * 10 s for a running one, which then resolves as stopping. A lone queued
+   * question is kept with the `<turn_aborted>` marker; a turn queued behind
+   * another is dropped.
    */
-  async cancel(streamId?: string): Promise<void> {
+  async cancel(streamId?: string): Promise<TurnCancellation> {
     await this.#assertOwner();
     const id = streamId ?? (await this.#headStreamId());
-    if (!id) return;
+    if (!id) return { state: 'exited' };
     AgentTurnId.assertOwner(this.#conversation, id);
-    await this.#interruption.interrupt(this.#conversation, id);
+    return this.#interruption.interrupt(this.#conversation, id);
   }
 
   async #assertOwner(): Promise<void> {

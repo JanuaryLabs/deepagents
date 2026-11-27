@@ -32,6 +32,7 @@ import type {
   AgentObservation,
   AgentPluginDefinition,
   AgentPluginInitialization,
+  TurnCancellation,
 } from '../../runtime/agent-runtime.ts';
 
 export type HttpEnv = { Variables: { userId: string } };
@@ -524,8 +525,11 @@ export function http(
         userId: context.get('userId'),
       };
       await requireSession(runtime, conversation);
-      await runtime.observe(conversation).cancel(turnId);
-      return context.body(null, 204, NO_STORE);
+      return cancelled(
+        context,
+        sessionId,
+        await runtime.observe(conversation).cancel(turnId),
+      );
     },
   );
   app.all(SESSION_TURN_CANCEL_ROUTE_PATH, (context) =>
@@ -621,8 +625,11 @@ export function http(
         userId: context.get('userId'),
       };
       await requireSession(runtime, conversation);
-      await runtime.observe(conversation).cancel();
-      return context.body(null, 204, NO_STORE);
+      return cancelled(
+        context,
+        sessionId,
+        await runtime.observe(conversation).cancel(),
+      );
     },
   );
   app.all(SESSION_CANCEL_ROUTE_PATH, (context) =>
@@ -753,6 +760,22 @@ function accepted<Env extends HttpEnv>(
     ...NO_STORE,
     [ZUKHRUF_SESSION_ID_HEADER]: sessionId,
     [ZUKHRUF_TURN_ID_HEADER]: turnId,
+  });
+}
+
+/**
+ * 204 once the turn has exited; 202 while it is still stopping at the end
+ * of the wait, pointing at the session, whose status goes idle when it exits.
+ */
+function cancelled<Env extends HttpEnv>(
+  context: Context<Env>,
+  sessionId: string,
+  cancellation: TurnCancellation,
+) {
+  if (cancellation.state === 'exited') return context.body(null, 204, NO_STORE);
+  return context.json({ sessionId, turnId: cancellation.turnId }, 202, {
+    ...NO_STORE,
+    location: `${mountPath(context)}/session/${sessionId}`,
   });
 }
 

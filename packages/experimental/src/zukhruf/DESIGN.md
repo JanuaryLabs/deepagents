@@ -229,7 +229,10 @@ Codex's `handle_task_abort`:
 - **Cancel answers once the turn has exited**, waiting at most 10 s (Codex's shutdown bound) for it
   to stop being the queue's current turn, as Codex answers `turn/interrupt` only on `TurnAborted`
   (`app-server/src/bespoke_event_handling.rs`). Until then the session read lists the turn as
-  `inProgress`.
+  `inProgress`. A turn that exits within the wait answers 204; one still running at the deadline
+  answers 202 Accepted with `{ sessionId, turnId }` and `Location: <mount>/session/:sessionId`,
+  whose `status.type` goes `active → idle` when the turn exits, since Zukhruf cannot force-abort a
+  turn another worker holds as Codex does after 100 ms (`core/src/tasks/mod.rs`) (#6250).
 
 Durability comes from **decoupling generation from consumption** through the store: the model keeps
 running even if every consumer drops; chunks pile up; a reconnecting `watch()` replays them. So even

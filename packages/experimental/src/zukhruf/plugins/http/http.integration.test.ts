@@ -73,7 +73,9 @@ const idleObservation = {
   async read() {
     return idleSession;
   },
-  async cancel() {},
+  async cancel() {
+    return { state: 'exited' as const };
+  },
   async resume() {
     return null;
   },
@@ -709,6 +711,7 @@ test('POST /zukhruf/v1/session/:sessionId/cancel cancels the current turn', asyn
         ...idleObservation,
         async cancel() {
           cancelled.push(conversation);
+          return { state: 'exited' as const };
         },
       };
     },
@@ -778,6 +781,7 @@ test('POST /zukhruf/v1/session/:sessionId/turn/:turnId/cancel cancels only that 
         ...idleObservation,
         async cancel(id?: string) {
           cancelled.push(id);
+          return { state: 'exited' as const };
         },
       };
     },
