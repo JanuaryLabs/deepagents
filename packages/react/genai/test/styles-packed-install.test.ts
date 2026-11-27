@@ -31,22 +31,38 @@ const PACKED_WORKSPACES = [
   '@deepagents/agent',
 ];
 
-async function installedVersion(name: string): Promise<[string, string]> {
-  const manifest: { version: string } = JSON.parse(
+/** The @zukhruf/* packages the host itself imports, as react-genai's README says. */
+const HOST_ZUKHRUF = ['@zukhruf/shadcn', '@zukhruf/ui'];
+
+async function installedManifest(name: string): Promise<{
+  version: string;
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+}> {
+  return JSON.parse(
     await readFile(
       join(repoRoot, 'node_modules', name, 'package.json'),
       'utf8',
     ),
   );
-  return [name, manifest.version];
 }
 
-async function packWorkspaces(destination: string, signal: AbortSignal) {
+async function installedVersion(name: string): Promise<[string, string]> {
+  return [name, (await installedManifest(name)).version];
+}
+
+/** Packs into `destination` and maps each package name to its `file:` tarball. */
+async function pack(
+  targets: string[],
+  destination: string,
+  signal: AbortSignal,
+) {
   const { stdout } = await run(
     'npm',
     [
       'pack',
-      ...PACKED_WORKSPACES.map((name) => `--workspace=${name}`),
+      ...targets,
       '--ignore-scripts',
       '--json',
       `--pack-destination=${destination}`,
@@ -59,6 +75,41 @@ async function packWorkspaces(destination: string, signal: AbortSignal) {
       name,
       `file:${join(destination, filename)}`,
     ]),
+  );
+}
+
+/**
+ * Packs every @zukhruf/* package the install reaches from `roots`, as the
+ * repo's lockfile installed it, so the host never asks a registry for one
+ * (#6163): a fresh @zukhruf release names sibling ranges the registry may not
+ * serve yet.
+ */
+async function packZukhrufClosure(
+  roots: string[],
+  destination: string,
+  signal: AbortSignal,
+) {
+  const closure = new Set<string>(
+    roots.filter((name) => name.startsWith('@zukhruf/')),
+  );
+  const pending = [...roots];
+  for (let name = pending.pop(); name; name = pending.pop()) {
+    const manifest = await installedManifest(name);
+    for (const dependency of Object.keys({
+      ...manifest.dependencies,
+      ...manifest.peerDependencies,
+      ...manifest.optionalDependencies,
+    })) {
+      if (dependency.startsWith('@zukhruf/') && !closure.has(dependency)) {
+        closure.add(dependency);
+        pending.push(dependency);
+      }
+    }
+  }
+  return pack(
+    [...closure].map((name) => join(repoRoot, 'node_modules', name)),
+    destination,
+    signal,
   );
 }
 
@@ -76,7 +127,16 @@ async function buildHostCss(
     'react-genai-tarballs-',
   );
   await using host = await temporaryFiles.directory('react-genai-host-');
-  const packed = await packWorkspaces(tarballs.path, signal);
+  const workspaces = await pack(
+    PACKED_WORKSPACES.map((name) => `--workspace=${name}`),
+    tarballs.path,
+    signal,
+  );
+  const zukhruf = await packZukhrufClosure(
+    [...PACKED_WORKSPACES, ...HOST_ZUKHRUF],
+    tarballs.path,
+    signal,
+  );
 
   await writeFile(
     join(host.path, 'package.json'),
@@ -85,7 +145,10 @@ async function buildHostCss(
       private: true,
       type: 'module',
       dependencies: {
-        ...packed,
+        ...workspaces,
+        ...Object.fromEntries(
+          HOST_ZUKHRUF.map((name) => [name, zukhruf[name]]),
+        ),
         ...Object.fromEntries(
           await Promise.all(
             [
@@ -94,15 +157,19 @@ async function buildHostCss(
               'vite',
               'react',
               'react-dom',
-              '@zukhruf/shadcn',
-              '@zukhruf/ui',
             ].map(installedVersion),
           ),
         ),
         ...hostDependencies,
       },
-      overrides: packed,
+      overrides: { ...workspaces, ...zukhruf },
     }),
+  );
+  // A @zukhruf/* package comes only from the repo's own install, never from a
+  // registry that may not serve a fresh publish yet (#6163): port 9 refuses.
+  await writeFile(
+    join(host.path, '.npmrc'),
+    '@zukhruf:registry=http://127.0.0.1:9/\n',
   );
   // Tailwind's source detection skips git-ignored paths, as in an installed host.
   await writeFile(join(host.path, '.gitignore'), 'node_modules\ndist\n');
