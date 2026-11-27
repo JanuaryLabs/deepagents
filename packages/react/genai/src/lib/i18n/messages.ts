@@ -40,7 +40,6 @@ export type GenaiMessages = {
   /** The host answered 429. */
   'chat.errorRateLimited': string;
   'chat.scrollToBottom': string;
-  'status.loading': string;
   'composer.attachFiles': string;
   'composer.commandMenu': string;
   'composer.send': string;
@@ -164,7 +163,6 @@ export const en: GenaiMessages = {
   'chat.error': 'Something went wrong. Try again.',
   'chat.errorRateLimited': 'Too many requests. Wait a moment, then try again.',
   'chat.scrollToBottom': 'Scroll to the latest message',
-  'status.loading': 'Loading',
   'composer.attachFiles': 'Attach files',
   'composer.commandMenu': 'Toggle command menu',
   'composer.send': 'Send prompt',

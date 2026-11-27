@@ -21,8 +21,6 @@ import {
 } from '../chat/trajectory/IndexProgressSegment.tsx';
 import { CompactMessages } from '../chat/trajectory/trajectories/compact-messages.tsx';
 import { MessagesError } from '../chat/trajectory/trajectories/messages-error.tsx';
-import { Messages } from '../chat/trajectory/trajectories/messages.tsx';
-import { TimelinedMessages } from '../chat/trajectory/trajectories/timelined-messages.tsx';
 import { ChatComposer } from '../components/ChatComposer.tsx';
 import { SubmitButton } from '../components/SubmitButton.tsx';
 import { MessageQueue } from '../components/queue.tsx';
@@ -83,7 +81,6 @@ const ar: GenaiMessages = {
   'chat.error': 'حدث خطأ. حاول مجددًا.',
   'chat.errorRateLimited': 'طلبات كثيرة. انتظر قليلًا ثم حاول مجددًا.',
   'chat.scrollToBottom': 'انتقل إلى آخر رسالة',
-  'status.loading': 'جارٍ التحميل',
   'composer.attachFiles': 'أرفق ملفات',
   'composer.commandMenu': 'بدّل قائمة الأوامر',
   'composer.send': 'أرسل الطلب',
@@ -788,31 +785,37 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
     });
   });
 
-  it('translates the greeting, the attachments, the reminders, the usage, the approval and the retry in static mode', () => {
+  it('translates the greeting, the attachments, the reminders, the usage, the approval and the retry in static mode', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
+    const user = userEvent.setup();
     const messages = [asked, delivered];
 
     render(
       inArabic(
         <>
           <AgentHeader.Hero />
-          <Messages.Root messages={messages} status="ready">
+          <CompactMessages.Root messages={messages} status="ready">
             {messages.map((message, index) => (
-              <Messages.Item key={message.id} message={message} index={index}>
+              <CompactMessages.Item
+                key={message.id}
+                message={message}
+                index={index}
+              >
                 {message.role === 'user' ? (
-                  <Messages.UserBubble />
+                  <CompactMessages.UserBubble />
                 ) : (
-                  <Messages.AssistantContent />
+                  <CompactMessages.AssistantContent />
                 )}
-              </Messages.Item>
+              </CompactMessages.Item>
             ))}
-          </Messages.Root>
+          </CompactMessages.Root>
           <MessagesError error={new Error('boom')} onRetry={() => undefined} />
         </>,
       ),
       { wrapper: Harness },
     );
+    await user.click(screen.getByRole('button', { name: /^runQuery\(/ }));
     const approval = screen.getByRole('group', { name: 'موافقة runQuery' });
 
     expect({
@@ -848,53 +851,72 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
     });
   });
 
-  it('translates the reasoning step and a step the user cancelled in the timeline in static mode', () => {
+  it('translates a step the user cancelled in static mode', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
     const message: UIMessage = {
       id: 'asst-cancelled',
       role: 'assistant',
-      parts: [
-        { type: 'reasoning', text: 'dosing' },
-        runQuery('tc-cancelled', 'input-available'),
-      ],
+      parts: [runQuery('tc-cancelled', 'input-available')],
     };
 
     const { container } = render(
       inArabic(
-        <QueryClientProvider client={new QueryClient()}>
-          <TimelinedMessages.Root messages={[message]} status="ready">
-            <TimelinedMessages.Item message={message} index={0}>
-              <TimelinedMessages.AssistantContent />
-            </TimelinedMessages.Item>
-          </TimelinedMessages.Root>
-        </QueryClientProvider>,
+        <CompactMessages.Root messages={[message]} status="ready">
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.AssistantContent />
+          </CompactMessages.Item>
+        </CompactMessages.Root>,
       ),
       { wrapper: Harness },
     );
 
     expect({
-      reasoning: container.textContent.includes('يفكّر'),
-      english: /Reasoning|Cancelled/.test(container.textContent),
+      english: /Cancelled/.test(container.textContent),
       cancelled: screen.getAllByText('ألغاه المستخدم').length,
-    }).toEqual({ reasoning: true, english: false, cancelled: 1 });
+    }).toEqual({ english: false, cancelled: 1 });
   });
 
-  it('translates the thinking line and the running step spinner in streaming mode', () => {
+  it('translates the running reasoning step in streaming mode', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
-    const lookingUp: UIMessage = {
-      id: 'asst-looking-up',
+    const message: UIMessage = {
+      id: 'asst-reasoning',
       role: 'assistant',
-      parts: [
-        {
-          type: 'tool-lookup',
-          toolCallId: 'tc-lookup',
-          state: 'input-available',
-          input: { term: 'apixaban' },
-        },
-      ],
+      parts: [{ type: 'reasoning', text: '\n\n' }],
     };
+
+    const { container } = render(
+      inArabic(
+        <ClockProvider clock={createClock()}>
+          <AgentProvider
+            chatId="genai-messages-reasoning"
+            debugMode
+            registry={registry}
+            transport={new StoredMessagesTransport()}
+            onResetChat={() => undefined}
+          >
+            <QueryClientProvider client={new QueryClient()}>
+              <CompactMessages.Root messages={[message]} status="streaming">
+                <CompactMessages.Item message={message} index={0}>
+                  <CompactMessages.AssistantContent />
+                </CompactMessages.Item>
+              </CompactMessages.Root>
+            </QueryClientProvider>
+          </AgentProvider>
+        </ClockProvider>,
+      ),
+    );
+
+    expect({
+      title: screen.getByText('يفكّر').tagName,
+      english: /Reasoning|Thinking/.test(container.textContent),
+    }).toEqual({ title: 'SPAN', english: false });
+  });
+
+  it('translates the thinking line in streaming mode', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
     const question: UIMessage = {
       id: 'user-question',
       role: 'user',
@@ -903,16 +925,9 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
 
     render(
       inArabic(
-        <>
-          <Messages.Root messages={[question]} status="streaming">
-            <Messages.Thinking />
-          </Messages.Root>
-          <TimelinedMessages.Root messages={[lookingUp]} status="streaming">
-            <TimelinedMessages.Item message={lookingUp} index={0}>
-              <TimelinedMessages.AssistantContent />
-            </TimelinedMessages.Item>
-          </TimelinedMessages.Root>
-        </>,
+        <CompactMessages.Root messages={[question]} status="streaming">
+          <CompactMessages.Thinking />
+        </CompactMessages.Root>,
       ),
       { wrapper: Harness },
     );
@@ -921,11 +936,8 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
       screen.getAllByRole('status').map((status) => ({
         label: status.getAttribute('aria-label'),
         text: status.textContent,
-      }))[0],
-    ).toEqual({ label: null, text: 'يفكّر…' });
-    expect(screen.getAllByRole('status', { name: 'جارٍ التحميل' }).length).toBe(
-      1,
-    );
+      })),
+    ).toEqual([{ label: null, text: 'يفكّر…' }]);
   });
 
   it('translates the debug view of a tool call', async () => {
@@ -948,15 +960,16 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
             transport={new StoredMessagesTransport()}
             onResetChat={() => undefined}
           >
-            <Messages.Root messages={[message]} status="ready">
-              <Messages.Item message={message} index={0}>
-                <Messages.AssistantContent />
-              </Messages.Item>
-            </Messages.Root>
+            <CompactMessages.Root messages={[message]} status="ready">
+              <CompactMessages.Item message={message} index={0}>
+                <CompactMessages.AssistantContent />
+              </CompactMessages.Item>
+            </CompactMessages.Root>
           </AgentProvider>
         </ClockProvider>,
       ),
     );
+    await user.click(screen.getByRole('button', { name: /^runQuery\(/ }));
     await user.click(screen.getByRole('button', { name: /ينفّذ runQuery/ }));
 
     expect({

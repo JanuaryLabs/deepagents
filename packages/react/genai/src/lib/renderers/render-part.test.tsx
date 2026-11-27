@@ -5,7 +5,7 @@ import { expect, test, vi } from 'vitest';
 
 import {
   AgentProvider,
-  Messages,
+  CompactMessages,
   useAgentMessages,
 } from '@deepagents/react-genai';
 
@@ -71,11 +71,11 @@ function ApprovalHarness() {
   if (!message) return null;
 
   return (
-    <Messages.Root messages={messages} status={status}>
-      <Messages.Item message={message} index={0}>
-        <Messages.AssistantContent />
-      </Messages.Item>
-    </Messages.Root>
+    <CompactMessages.Root messages={messages} status={status}>
+      <CompactMessages.Item message={message} index={0}>
+        <CompactMessages.AssistantContent />
+      </CompactMessages.Item>
+    </CompactMessages.Root>
   );
 }
 

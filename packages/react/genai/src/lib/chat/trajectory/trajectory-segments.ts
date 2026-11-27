@@ -27,28 +27,6 @@ export function classifyPart(
   return null;
 }
 
-export function isVisibleTrajectoryNode(
-  segment: MessageTrajectorySegment,
-  debugMode: boolean | undefined,
-): boolean {
-  if (segment.kind === 'text' || segment.kind === 'file') return false;
-  if (segment.kind === 'source') return false;
-  if (segment.kind === 'reasoning') return true;
-  if (segment.kind === 'dynamic-tool') {
-    return !!debugMode;
-  }
-  return true;
-}
-
-export function shouldShowConnector(
-  segments: MessageTrajectorySegment[],
-  segmentIndex: number,
-  debugMode: boolean | undefined,
-): boolean {
-  const next = segments[segmentIndex + 1];
-  return !!next && isVisibleTrajectoryNode(next, debugMode);
-}
-
 export function buildMessageTrajectorySegments(
   parts: UIMessage['parts'],
 ): MessageTrajectorySegment[] {

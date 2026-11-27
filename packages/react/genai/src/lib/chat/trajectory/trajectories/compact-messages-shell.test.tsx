@@ -8,14 +8,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { StoredMessagesTransport } from '../../../../testing/stored-messages-transport.ts';
 import type { GenAIInteractiveElement } from '../../../elements/interactive-element.ts';
+import type { ComponentRegistry } from '../../../tools/registry.ts';
 import { AgentProvider } from '../../agent-context.tsx';
 import { useMessageItem, useMessagesContext } from '../messages-context.ts';
-import { Messages } from './messages.tsx';
+import { CompactMessages } from './compact-messages.tsx';
 
 function AgentHarness({ children }: { children: ReactNode }) {
   return (
     <AgentProvider
-      chatId="messages-test"
+      chatId="compact-messages-shell-test"
       debugMode={false}
       registry={{}}
       transport={new StoredMessagesTransport()}
@@ -52,35 +53,35 @@ function makeAssistantMessage(
   };
 }
 
-describe('Messages (Root)', () => {
+describe('CompactMessages.Root', () => {
   it('renders children inside layout wrapper', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
     const messages = [makeUserMessage('Hello')];
     render(
-      <Messages.Root messages={messages}>
+      <CompactMessages.Root messages={messages}>
         <div>child content</div>
-      </Messages.Root>,
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByText('child content')).toBeInTheDocument();
   });
 });
 
-describe('Messages.List', () => {
+describe('CompactMessages.List', () => {
   it('renders children in flex column', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
     const messages = [makeUserMessage('Hello')];
     render(
-      <Messages.Root messages={messages}>
-        <Messages.List>
+      <CompactMessages.Root messages={messages}>
+        <CompactMessages.List>
           <div>item 1</div>
           <div>item 2</div>
-        </Messages.List>
-      </Messages.Root>,
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByText('item 1')).toBeInTheDocument();
@@ -88,20 +89,20 @@ describe('Messages.List', () => {
   });
 });
 
-describe('Messages.Item', () => {
+describe('CompactMessages.Item', () => {
   it('renders children', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
     const message = makeUserMessage('Hello');
     render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={message} index={0}>
             <div>item content</div>
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByText('item content')).toBeInTheDocument();
@@ -119,33 +120,33 @@ describe('Messages.Item', () => {
     }
 
     render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={message} index={0}>
             <ContextReader />
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByText('role: user')).toBeInTheDocument();
   });
 });
 
-describe('Messages.UserBubble', () => {
+describe('CompactMessages.UserBubble', () => {
   it('shows user text message', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
     const message = makeUserMessage('Hello world');
     render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
-            <Messages.UserBubble />
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.UserBubble />
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByText('Hello world')).toBeInTheDocument();
@@ -158,13 +159,13 @@ describe('Messages.UserBubble', () => {
     const message = makeUserMessage('Hello world');
     render(
       <div dir="rtl">
-        <Messages.Root messages={[message]}>
-          <Messages.List>
-            <Messages.Item message={message} index={0}>
-              <Messages.UserBubble />
-            </Messages.Item>
-          </Messages.List>
-        </Messages.Root>
+        <CompactMessages.Root messages={[message]}>
+          <CompactMessages.List>
+            <CompactMessages.Item message={message} index={0}>
+              <CompactMessages.UserBubble />
+            </CompactMessages.Item>
+          </CompactMessages.List>
+        </CompactMessages.Root>
       </div>,
       { wrapper: AgentHarness },
     );
@@ -181,13 +182,13 @@ describe('Messages.UserBubble', () => {
       'Use [$Revenue Analysis](skill://skill-123) for Q2.',
     );
     render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
-            <Messages.UserBubble />
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.UserBubble />
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
 
@@ -208,13 +209,13 @@ describe('Messages.UserBubble', () => {
       metadata: { alias: 'Summarize data' },
     });
     render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
-            <Messages.UserBubble />
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.UserBubble />
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByText('Summarize data')).toBeInTheDocument();
@@ -230,13 +231,13 @@ describe('Messages.UserBubble', () => {
     });
     render(
       <div dir="rtl">
-        <Messages.Root messages={[message]}>
-          <Messages.List>
-            <Messages.Item message={message} index={0}>
-              <Messages.UserBubble />
-            </Messages.Item>
-          </Messages.List>
-        </Messages.Root>
+        <CompactMessages.Root messages={[message]}>
+          <CompactMessages.List>
+            <CompactMessages.Item message={message} index={0}>
+              <CompactMessages.UserBubble />
+            </CompactMessages.Item>
+          </CompactMessages.List>
+        </CompactMessages.Root>
       </div>,
       { wrapper: AgentHarness },
     );
@@ -246,20 +247,20 @@ describe('Messages.UserBubble', () => {
   });
 });
 
-describe('Messages.AssistantContent', () => {
+describe('CompactMessages.AssistantContent', () => {
   it('shows text part content', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
     const message = makeAssistantMessage('Here is your answer');
     render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
-            <Messages.AssistantContent />
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.AssistantContent />
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByText('Here is your answer')).toBeInTheDocument();
@@ -283,13 +284,13 @@ describe('Messages.AssistantContent', () => {
     };
 
     render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
-            <Messages.AssistantContent />
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.AssistantContent />
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByText(/output\.json/)).toBeInTheDocument();
@@ -313,13 +314,13 @@ describe('Messages.AssistantContent', () => {
     };
 
     const { container } = render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
-            <Messages.AssistantContent />
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.AssistantContent />
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     const video = container.querySelector('video');
@@ -331,18 +332,60 @@ describe('Messages.AssistantContent', () => {
     );
     expect(screen.getByText(/highlight\.mp4/)).toBeInTheDocument();
   });
+
+  it('shows tool output for tool parts', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const registry: ComponentRegistry = {
+      executeQuery: {
+        static: true,
+        component: () => <span>tool-output</span>,
+      },
+    };
+    const message: UIMessage = {
+      id: 'asst-tool',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-executeQuery',
+          toolCallId: 'tc-1',
+          state: 'output-available',
+          input: {},
+          output: 'result',
+        },
+      ],
+    };
+
+    render(
+      <AgentProvider
+        chatId="compact-messages-shell-tool-test"
+        debugMode={false}
+        registry={registry}
+        transport={new StoredMessagesTransport()}
+        onResetChat={() => undefined}
+      >
+        <CompactMessages.Root messages={[message]}>
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.AssistantContent />
+          </CompactMessages.Item>
+        </CompactMessages.Root>
+      </AgentProvider>,
+    );
+    expect(screen.getByText('tool-output')).toBeInTheDocument();
+  });
 });
 
-describe('Messages.Thinking', () => {
+describe('CompactMessages.Thinking', () => {
   it('shows nothing when status is ready', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
     const messages = [makeUserMessage('Hello')];
     render(
-      <Messages.Root messages={messages}>
-        <Messages.Thinking />
-      </Messages.Root>,
+      <CompactMessages.Root messages={messages}>
+        <CompactMessages.Thinking />
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
@@ -354,9 +397,9 @@ describe('Messages.Thinking', () => {
 
     const messages = [makeUserMessage('Hello')];
     render(
-      <Messages.Root messages={messages} status="streaming">
-        <Messages.Thinking />
-      </Messages.Root>,
+      <CompactMessages.Root messages={messages} status="streaming">
+        <CompactMessages.Thinking />
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByRole('status')).toBeInTheDocument();
@@ -367,24 +410,24 @@ describe('Messages.Thinking', () => {
     stack.defer(cleanup);
 
     render(
-      <Messages.Root messages={[]} status="streaming">
-        <Messages.Thinking />
-      </Messages.Root>,
+      <CompactMessages.Root messages={[]} status="streaming">
+        <CompactMessages.Thinking />
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
 
-describe('Messages.Error', () => {
+describe('CompactMessages.Error', () => {
   it('shows nothing when no error', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
     render(
-      <Messages.Root messages={[]}>
-        <Messages.Error />
-      </Messages.Root>,
+      <CompactMessages.Root messages={[]}>
+        <CompactMessages.Error />
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(
@@ -397,9 +440,9 @@ describe('Messages.Error', () => {
     stack.defer(cleanup);
 
     render(
-      <Messages.Root messages={[]}>
-        <Messages.Error error={new Error('fail')} />
-      </Messages.Root>,
+      <CompactMessages.Root messages={[]}>
+        <CompactMessages.Error error={new Error('fail')} />
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(
@@ -413,12 +456,12 @@ describe('Messages.Error', () => {
 
     const onRetry = vi.fn();
     render(
-      <Messages.Root messages={[]}>
-        <Messages.Error
+      <CompactMessages.Root messages={[]}>
+        <CompactMessages.Error
           error={new Error('Something broke')}
           onRetry={onRetry}
         />
-      </Messages.Root>,
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -437,9 +480,9 @@ describe('Messages.Error', () => {
     const user = userEvent.setup();
     const onRetry = vi.fn();
     render(
-      <Messages.Root messages={[]}>
-        <Messages.Error error={new Error('fail')} onRetry={onRetry} />
-      </Messages.Root>,
+      <CompactMessages.Root messages={[]}>
+        <CompactMessages.Error error={new Error('fail')} onRetry={onRetry} />
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
 
@@ -450,7 +493,7 @@ describe('Messages.Error', () => {
 });
 
 describe('context hooks', () => {
-  it('useMessagesContext throws outside Messages', () => {
+  it('useMessagesContext throws outside CompactMessages.Root', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
@@ -459,11 +502,11 @@ describe('context hooks', () => {
       return null;
     }
     expect(() => render(<Bad />)).toThrow(
-      'useMessagesContext must be used within <Messages>',
+      'useMessagesContext must be used within <CompactMessages.Root>',
     );
   });
 
-  it('useMessageItem throws outside Messages.Item', () => {
+  it('useMessageItem throws outside CompactMessages.Item', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
@@ -472,12 +515,39 @@ describe('context hooks', () => {
       return null;
     }
     expect(() => render(<Bad />)).toThrow(
-      'useMessageItem must be used within <Messages.Item>',
+      'useMessageItem must be used within <CompactMessages.Item>',
     );
   });
 });
 
-describe('Messages text citations (#5951)', () => {
+describe('CompactMessages full composition', () => {
+  it('renders user and assistant messages together', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const userMsg = makeUserMessage('What is sales?');
+    const assistantMsg = makeAssistantMessage('Sales data shows...');
+
+    render(
+      <CompactMessages.Root messages={[userMsg, assistantMsg]}>
+        <CompactMessages.List>
+          <CompactMessages.Item message={userMsg} index={0}>
+            <CompactMessages.UserBubble />
+          </CompactMessages.Item>
+          <CompactMessages.Item message={assistantMsg} index={1}>
+            <CompactMessages.AssistantContent />
+          </CompactMessages.Item>
+        </CompactMessages.List>
+      </CompactMessages.Root>,
+      { wrapper: AgentHarness },
+    );
+
+    expect(screen.getByText('What is sales?')).toBeInTheDocument();
+    expect(screen.getByText('Sales data shows...')).toBeInTheDocument();
+  });
+});
+
+describe('CompactMessages text citations (#5951)', () => {
   function urlCitation(
     url: string,
     endIndex?: number,
@@ -500,18 +570,22 @@ describe('Messages text citations (#5951)', () => {
 
   function renderAnswers(
     messages: UIMessage[],
-    citation?: Parameters<typeof Messages.Root>[0]['citation'],
+    citation?: Parameters<typeof CompactMessages.Root>[0]['citation'],
   ) {
     return render(
-      <Messages.Root messages={messages} citation={citation}>
-        <Messages.List>
+      <CompactMessages.Root messages={messages} citation={citation}>
+        <CompactMessages.List>
           {messages.map((message, index) => (
-            <Messages.Item key={message.id} message={message} index={index}>
-              <Messages.AssistantContent />
-            </Messages.Item>
+            <CompactMessages.Item
+              key={message.id}
+              message={message}
+              index={index}
+            >
+              <CompactMessages.AssistantContent />
+            </CompactMessages.Item>
           ))}
-        </Messages.List>
-      </Messages.Root>,
+        </CompactMessages.List>
+      </CompactMessages.Root>,
       { wrapper: AgentHarness },
     );
   }
@@ -601,6 +675,54 @@ describe('Messages text citations (#5951)', () => {
     );
   });
 
+  it('draws a source that is both a source-url part and a text citation once, inline, still draws a source nobody cites, and numbers them in the order they are drawn (#6022)', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const text = 'Apixaban needs no change in mild impairment.';
+    const cited = 'https://pubmed.example/1';
+    const message: UIMessage = {
+      id: 'asst-cited-source-url',
+      role: 'assistant',
+      parts: [
+        { type: 'source-url', sourceId: 's1', url: cited, title: 'Cited' },
+        {
+          type: 'source-url',
+          sourceId: 's2',
+          url: 'https://pubmed.example/2',
+          title: 'Listed',
+        },
+        {
+          type: 'text',
+          text,
+          citations: [
+            {
+              source: {
+                type: 'source',
+                sourceType: 'url',
+                id: 's1',
+                url: cited,
+                title: 'Cited',
+              },
+              startIndex: 0,
+              endIndex: text.length,
+            },
+          ],
+        },
+      ],
+    };
+    renderAnswers([message]);
+
+    const pills = screen.getAllByRole('button', { name: /^Source / });
+    expect({
+      names: pills.map((pill) => pill.getAttribute('aria-label')),
+      firstInSentence: pills[0]?.closest('p')?.textContent,
+    }).toEqual({
+      names: ['Source 1', 'Source 2'],
+      firstInSentence: undefined,
+    });
+  });
+
   it('copies an answer without the markup of its declared elements, keeping a paired element’s words and code as written (#6048)', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
@@ -650,11 +772,11 @@ describe('Messages text citations (#5951)', () => {
     );
     render(
       <ClockProvider clock={createClock()}>
-        <Messages.Root messages={[answer]} elements={elements}>
-          <Messages.Item message={answer} index={0}>
-            <Messages.CopyAction />
-          </Messages.Item>
-        </Messages.Root>
+        <CompactMessages.Root messages={[answer]} elements={elements}>
+          <CompactMessages.Item message={answer} index={0}>
+            <CompactMessages.CopyAction />
+          </CompactMessages.Item>
+        </CompactMessages.Root>
       </ClockProvider>,
       { wrapper: AgentHarness },
     );
@@ -728,11 +850,11 @@ describe('Messages text citations (#5951)', () => {
     };
     render(
       <ClockProvider clock={createClock()}>
-        <Messages.Root messages={[answer]}>
-          <Messages.Item message={answer} index={0}>
-            <Messages.CopyAction />
-          </Messages.Item>
-        </Messages.Root>
+        <CompactMessages.Root messages={[answer]}>
+          <CompactMessages.Item message={answer} index={0}>
+            <CompactMessages.CopyAction />
+          </CompactMessages.Item>
+        </CompactMessages.Root>
       </ClockProvider>,
       { wrapper: AgentHarness },
     );
@@ -792,7 +914,7 @@ describe('Messages text citations (#5951)', () => {
   });
 });
 
-describe('Messages copy of a host’s declared elements (#6090)', () => {
+describe('CompactMessages copy of a host’s declared elements (#6090)', () => {
   function declared(name: string): GenAIInteractiveElement {
     return {
       name,
@@ -822,12 +944,12 @@ describe('Messages copy of a host’s declared elements (#6090)', () => {
     stack.defer(() => Reflect.deleteProperty(navigator, 'clipboard'));
     render(
       <ClockProvider clock={createClock()}>
-        <Messages.Root messages={[answer]} elements={elements}>
-          <Messages.Item message={answer} index={0}>
-            <Messages.AssistantContent />
-            <Messages.CopyAction />
-          </Messages.Item>
-        </Messages.Root>
+        <CompactMessages.Root messages={[answer]} elements={elements}>
+          <CompactMessages.Item message={answer} index={0}>
+            <CompactMessages.AssistantContent />
+            <CompactMessages.CopyAction />
+          </CompactMessages.Item>
+        </CompactMessages.Root>
       </ClockProvider>,
       { wrapper: AgentHarness },
     );

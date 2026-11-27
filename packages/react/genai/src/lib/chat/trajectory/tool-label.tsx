@@ -24,41 +24,6 @@ function useToolActionsVisible({
   );
 }
 
-export function ToolLabelInline({
-  label,
-  part,
-}: {
-  label: ToolLabel;
-  part: ToolUIPart;
-}) {
-  const Icon = label.icon;
-  const Actions = label.actions;
-  const showActions = useToolActionsVisible({ label, part, state: part.state });
-
-  return (
-    <div className="text-muted-foreground flex items-center justify-between gap-1.5 text-xs">
-      <div className="flex items-center gap-1.5">
-        {Icon && (
-          <Icon
-            className={cn(
-              'size-3.5',
-              label.isError ? 'text-destructive' : 'text-muted-foreground',
-            )}
-          />
-        )}
-        {label.kind === 'sentence' ? (
-          <span dir="auto" className="text-start">
-            {label.text}
-          </span>
-        ) : (
-          <span className="font-mono">{label.name}</span>
-        )}
-      </div>
-      {showActions && Actions && <Actions part={part} />}
-    </div>
-  );
-}
-
 /**
  * One `name: "value"` pair inside a tool signature. Hosts render their own
  * leading args as children of Segment.ToolDisclosure — a label builder is a

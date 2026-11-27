@@ -152,16 +152,6 @@ type ToolSegmentContextValue = {
 
 const ToolSegmentContext = createContext<ToolSegmentContextValue | null>(null);
 
-/**
- * Marker-relevant subset for arrangement wrappers (Timeline.Item) that sit
- * inside Segment.Tool and need label/state without the strict-context throw.
- */
-export const ToolSegmentMarkerContext = createContext<{
-  label: ToolLabel | undefined;
-  state: ToolUIPart['state'];
-  aborted: boolean;
-} | null>(null);
-
 export function useToolSegment() {
   const context = use(ToolSegmentContext);
   if (!context) {
@@ -202,11 +192,7 @@ function SegmentTool({
     <ToolSegmentContext
       value={{ part: toolPart, label, aborted, activeClientInput, defaultOpen }}
     >
-      <ToolSegmentMarkerContext
-        value={{ label, state: toolPart.state, aborted }}
-      >
-        {children ?? <SegmentToolDisclosure />}
-      </ToolSegmentMarkerContext>
+      {children ?? <SegmentToolDisclosure />}
     </ToolSegmentContext>
   );
 }

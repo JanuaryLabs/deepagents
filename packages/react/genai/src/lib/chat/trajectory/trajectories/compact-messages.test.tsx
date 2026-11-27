@@ -13,7 +13,6 @@ import {
   CompactTrajectory,
   useTrajectoryItems,
 } from './compact-messages.tsx';
-import { Messages } from './messages.tsx';
 
 const registry: ComponentRegistry = {
   runQuery: {
@@ -401,28 +400,6 @@ describe('CompactMessages with sentence labels', () => {
     ]);
 
     expect(trigger).toHaveTextContent(/^Searching apixaban$/);
-  });
-
-  it('draws a sentence step in Messages as the sentence in its own direction', () => {
-    using stack = new DisposableStack();
-    stack.defer(cleanup);
-
-    const message: UIMessage = {
-      id: 'asst-messages-sentence',
-      role: 'assistant',
-      parts: [searchStep('بحث عن أبيكسابان')],
-    };
-    render(
-      <Messages.Root messages={[message]}>
-        <Messages.Item message={message} index={0}>
-          <Messages.AssistantContent />
-        </Messages.Item>
-      </Messages.Root>,
-      { wrapper: SentenceHarness },
-    );
-
-    expect(screen.getByText('بحث عن أبيكسابان')).toHaveAttribute('dir', 'auto');
-    expect(screen.queryByText(/\(/)).toBeNull();
   });
 
   it('refuses call args on a sentence label', () => {

@@ -39,8 +39,6 @@ export {
   MessagesList,
   MessagesRoot,
 } from './trajectories/messages-shell.tsx';
-export { Messages } from './trajectories/messages.tsx';
-export { TimelinedMessages } from './trajectories/timelined-messages.tsx';
 export {
   MessageMetadata,
   MessagesUserBubble,

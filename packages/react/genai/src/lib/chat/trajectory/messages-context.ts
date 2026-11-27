@@ -28,7 +28,9 @@ export const MessageItemContext = createContext<
 export function useMessagesContext() {
   const ctx = use(MessagesContext);
   if (!ctx) {
-    throw new Error('useMessagesContext must be used within <Messages>');
+    throw new Error(
+      'useMessagesContext must be used within <CompactMessages.Root>',
+    );
   }
   return ctx;
 }
@@ -37,14 +39,16 @@ export function useMessagesStatus() {
   const ctx = use(MessagesContext);
   const { status } = useAgentStatus();
   // Soft fallback: status is derivable from agent context, so we don't
-  // force callers to wrap in <Messages.Root> or pass status= just to read it.
+  // force callers to wrap in <CompactMessages.Root> or pass status= just to read it.
   return ctx?.status ?? status;
 }
 
 export function useMessageItem() {
   const ctx = use(MessageItemContext);
   if (!ctx) {
-    throw new Error('useMessageItem must be used within <Messages.Item>');
+    throw new Error(
+      'useMessageItem must be used within <CompactMessages.Item>',
+    );
   }
   return ctx;
 }

@@ -4,7 +4,7 @@ import { expect, test } from 'vitest';
 
 import {
   AgentProvider,
-  Messages,
+  CompactMessages,
   UserMessageContent,
 } from '@deepagents/react-genai';
 
@@ -37,11 +37,11 @@ function renderAssistantFile(mediaType: string) {
       transport={idleTransport}
       onResetChat={() => {}}
     >
-      <Messages.Root messages={[message]}>
-        <Messages.Item message={message} index={0}>
-          <Messages.AssistantContent />
-        </Messages.Item>
-      </Messages.Root>
+      <CompactMessages.Root messages={[message]}>
+        <CompactMessages.Item message={message} index={0}>
+          <CompactMessages.AssistantContent />
+        </CompactMessages.Item>
+      </CompactMessages.Root>
     </AgentProvider>,
   );
 }

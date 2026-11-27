@@ -6,10 +6,9 @@ import { z } from 'zod';
 
 import {
   AgentProvider,
+  CompactMessages,
   type ComponentRegistry,
-  Messages,
   PendingToolInput,
-  TimelinedMessages,
   useAgentMessages,
 } from '@deepagents/react-genai';
 
@@ -29,29 +28,16 @@ class IdleTransport implements ChatTransport<UIMessage> {
   });
 }
 
-function MessagesHarness() {
+function CompactHarness() {
   const { messages, status } = useAgentMessages();
   const message = messages[0];
   if (!message) return null;
   return (
-    <Messages.Root messages={messages} status={status}>
-      <Messages.Item message={message} index={0}>
-        <Messages.AssistantContent />
-      </Messages.Item>
-    </Messages.Root>
-  );
-}
-
-function TimelinedHarness() {
-  const { messages, status } = useAgentMessages();
-  const message = messages[0];
-  if (!message) return null;
-  return (
-    <TimelinedMessages.Root messages={messages} status={status}>
-      <TimelinedMessages.Item message={message} index={0}>
-        <TimelinedMessages.AssistantContent />
-      </TimelinedMessages.Item>
-    </TimelinedMessages.Root>
+    <CompactMessages.Root messages={messages} status={status}>
+      <CompactMessages.Item message={message} index={0}>
+        <CompactMessages.AssistantContent />
+      </CompactMessages.Item>
+    </CompactMessages.Root>
   );
 }
 
@@ -101,7 +87,7 @@ test('a dynamic tool is labelled by its tool name', () => {
           output: 'sunny',
         },
       ],
-      <MessagesHarness />,
+      <CompactHarness />,
       { debugMode: true },
     );
 
@@ -123,7 +109,7 @@ test('a static tool part renders the registry component of its tool name', () =>
           output: {},
         },
       ],
-      <MessagesHarness />,
+      <CompactHarness />,
       {
         registry: {
           'render-chart': { component: ChartRenderer, static: true },
@@ -149,7 +135,7 @@ test('an approval request is labelled by its tool name', () => {
           approval: { id: 'approval-1' },
         },
       ],
-      <MessagesHarness />,
+      <CompactHarness />,
       { registry: {} },
     );
 
@@ -195,7 +181,7 @@ test('a cancelled tool without a registry label is named by its tool name', () =
           input: { query: 'docs' },
         },
       ],
-      <TimelinedHarness />,
+      <CompactHarness />,
     );
 
     expect(screen.getByText(/^tool-search\(/)).toBeInTheDocument();

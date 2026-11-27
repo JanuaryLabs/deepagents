@@ -9,7 +9,7 @@ import {
   AgentProvider,
   CodeBlock,
   CodeBlockCopyButton,
-  Messages,
+  CompactMessages,
 } from '@deepagents/react-genai';
 
 const idleTransport: ChatTransport<UIMessage> & {
@@ -43,11 +43,11 @@ test('a JSON tool input renders highlighted tokens', async () => {
         transport={idleTransport}
         onResetChat={() => {}}
       >
-        <Messages.Root messages={[message]}>
-          <Messages.Item message={message} index={0}>
-            <Messages.AssistantContent />
-          </Messages.Item>
-        </Messages.Root>
+        <CompactMessages.Root messages={[message]} status="streaming">
+          <CompactMessages.Item message={message} index={0}>
+            <CompactMessages.AssistantContent />
+          </CompactMessages.Item>
+        </CompactMessages.Root>
       </AgentProvider>,
     );
 
