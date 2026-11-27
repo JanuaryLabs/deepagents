@@ -23,7 +23,7 @@ describe('normalizeStreamdownChildren', () => {
     it('handles multiple consecutive self-closing tags', () => {
       assert.strictEqual(
         normalizeStreamdownChildren('<kpi /><bar-chart /><line-chart />'),
-        '<kpi />\n\n<bar-chart />\n\n<line-chart />',
+        '<kpi />\n\n<bar-chart></bar-chart>\n\n<line-chart></line-chart>',
       );
     });
   });
@@ -311,7 +311,7 @@ describe('normalizeStreamdownChildren', () => {
           '<data-insight title="Stats"><metric-row label="A" value="1" /></data-insight>',
           ['data-insight', 'metric-row'],
         ),
-        '\n\n<div><data-insight title="Stats"><div><metric-row label="A" value="1"/></div>\n\n</data-insight></div>',
+        '\n\n<div>\n<data-insight title="Stats"><div><metric-row label="A" value="1"/></div>\n\n</data-insight>\n</div>',
       );
     });
 
@@ -321,7 +321,7 @@ describe('normalizeStreamdownChildren', () => {
           '<data-insight title="Stats"><metric-row label="A" value="1" /><metric-row label="B" value="2" /></data-insight>',
           ['data-insight', 'metric-row'],
         ),
-        '\n\n<div><data-insight title="Stats"><div><metric-row label="A" value="1"/></div>\n\n<div><metric-row label="B" value="2"/></div>\n\n</data-insight></div>',
+        '\n\n<div>\n<data-insight title="Stats"><div><metric-row label="A" value="1"/></div>\n\n<div><metric-row label="B" value="2"/></div>\n\n</data-insight>\n</div>',
       );
     });
 
@@ -331,7 +331,7 @@ describe('normalizeStreamdownChildren', () => {
           '<data-insight title="Stats">\n<metric-row label="A" value="1" />\n\n- **Bold**: text\n</data-insight>',
           ['data-insight', 'metric-row'],
         ),
-        '\n\n<div><data-insight title="Stats">\n<div><metric-row label="A" value="1"/></div>\n\n- **Bold**: text\n</data-insight></div>',
+        '\n\n<div>\n<data-insight title="Stats">\n<div><metric-row label="A" value="1"/></div>\n\n- **Bold**: text\n</data-insight>\n</div>',
       );
     });
   });
@@ -340,7 +340,7 @@ describe('normalizeStreamdownChildren', () => {
     it('self-closing with explicit tagNames is not wrapped', () => {
       assert.strictEqual(
         normalizeStreamdownChildren('<kpi title="A" />', ['kpi']),
-        '<kpi title="A"/>',
+        '<kpi title="A"></kpi>',
       );
     });
 
@@ -350,7 +350,7 @@ describe('normalizeStreamdownChildren', () => {
           '<kpi title="A"></kpi>\n<kpi title="B" />\n<kpi title="C"></kpi>',
           ['kpi'],
         ),
-        '\n\n<div><kpi title="A"></kpi></div>\n<kpi title="B"/>\n\n<div><kpi title="C"></kpi></div>',
+        '\n\n<div><kpi title="A"></kpi></div>\n\n<kpi title="B"></kpi>\n\n<div><kpi title="C"></kpi></div>',
       );
     });
 
@@ -360,7 +360,7 @@ describe('normalizeStreamdownChildren', () => {
           '<kpi title="Total" sql="SELECT COUNT(*)" /><line-chart title="Trend" sql="SELECT 1"></line-chart>',
           ['kpi', 'line-chart'],
         ),
-        '<kpi title="Total" sql="SELECT COUNT(*)"/>\n\n<div><line-chart title="Trend" sql="SELECT 1"></line-chart></div>',
+        '<kpi title="Total" sql="SELECT COUNT(*)"></kpi>\n\n<div><line-chart title="Trend" sql="SELECT 1"></line-chart></div>',
       );
     });
   });
@@ -438,7 +438,7 @@ describe('normalizeStreamdownChildren', () => {
         normalizeStreamdownChildren(
           '<line-chart title="A"></line-chart>\nDone.',
         ),
-        '\n\n<div><line-chart title="A"></line-chart></div>\nDone.',
+        '\n\n<div><line-chart title="A"></line-chart></div>\n\nDone.',
       );
     });
   });

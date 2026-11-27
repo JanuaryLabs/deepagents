@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { expect, test } from 'vitest';
 
 import { Response } from '../elements/Response.tsx';
@@ -32,30 +33,38 @@ test('rejects an element that declares a sanitizer-clobbered attribute', () => {
   }
 });
 
-test('top-level custom elements stay wrapped in a bare class-less div', () => {
-  // Bare wrappers are part of the public rendering contract. A class or extra
-  // layer would prevent consumers from making this structural wrapper
-  // layout-transparent.
-  const paramElement = {
-    name: 'param-probe',
-    component: ParamProbe,
-    allowedAttributes: ['param', 'label'],
-  };
+test.each([
+  ['static', 'static'],
+  ['the chat’s streaming', undefined],
+] as const)(
+  'top-level custom elements stay wrapped in a bare div with no attributes in %s mode (#5988)',
+  (_case, mode) => {
+    // Bare wrappers are part of the public rendering contract. A class or extra
+    // layer would prevent consumers from making this structural wrapper
+    // layout-transparent.
+    const paramElement = {
+      name: 'param-probe',
+      component: ParamProbe,
+      allowedAttributes: ['param', 'label'],
+    };
 
-  try {
-    render(
-      <InteractiveResponse elements={[paramElement]}>
-        {'<param-probe param="state"></param-probe>'}
-      </InteractiveResponse>,
-    );
+    try {
+      render(
+        <InteractiveResponse elements={[paramElement]} mode={mode}>
+          {'<param-probe param="state"></param-probe>'}
+        </InteractiveResponse>,
+      );
 
-    const wrapper = screen.getByTestId('probe').parentElement;
-    expect(wrapper?.tagName).toBe('DIV');
-    expect(wrapper?.hasAttribute('class')).toBe(false);
-  } finally {
-    cleanup();
-  }
-});
+      const wrapper = screen.getByTestId('probe').parentElement;
+      expect({
+        tag: wrapper?.tagName,
+        attributes: wrapper?.getAttributeNames(),
+      }).toEqual({ tag: 'DIV', attributes: [] });
+    } finally {
+      cleanup();
+    }
+  },
+);
 
 test('the param attribute reaches the element verbatim through the sanitize pipeline', () => {
   const paramElement = {
@@ -329,49 +338,133 @@ test('an element alone on the line after a sentence stays a block, outside the s
   }
 });
 
-test('an element alone on a line between two lines of text keeps the text after it', () => {
-  try {
-    const { container } = render(
-      <InteractiveResponse elements={[passageCite]}>
-        {
-          'Aspirin lowers the risk.\n<passage-cite passage="pubmed:1" />\nIt works in adults.'
-        }
-      </InteractiveResponse>,
-    );
+test.each([
+  ['static', 'static'],
+  ['the chat’s streaming', undefined],
+] as const)(
+  'an element alone on a line between two lines of text keeps the text after it in %s mode',
+  (_case, mode) => {
+    try {
+      render(
+        <InteractiveResponse elements={[passageCite]} mode={mode}>
+          {
+            'Aspirin lowers the risk.\n<passage-cite passage="pubmed:1" />\nIt works in adults.'
+          }
+        </InteractiveResponse>,
+      );
 
-    expect({
-      text: container.textContent,
-      afterInsideCite: screen
-        .getByTestId('cite')
-        .contains(screen.getByText('It works in adults.')),
-    }).toEqual({
-      text: 'Aspirin lowers the risk.\n[pubmed:1]It works in adults.',
-      afterInsideCite: false,
-    });
-  } finally {
-    cleanup();
-  }
-});
+      const cite = screen.getByTestId('cite');
+      const after = screen.queryByText('It works in adults.');
+      expect({
+        children: cite.dataset.children,
+        after: after?.tagName,
+        afterInsideCite: cite.contains(after),
+      }).toEqual({ children: 'none', after: 'P', afterInsideCite: false });
+    } finally {
+      cleanup();
+    }
+  },
+);
 
-test('self-closing elements on lines of their own stay blocks, outside any paragraph', () => {
-  try {
-    render(
-      <InteractiveResponse elements={[passageCite]}>
-        {
-          '<passage-cite passage="pubmed:1" />\n<passage-cite passage="pubmed:2" />'
-        }
-      </InteractiveResponse>,
-    );
+test.each([
+  ['static', 'static'],
+  ['the chat’s streaming', undefined],
+] as const)(
+  'a self-closing element on a line of its own between paragraphs keeps the paragraph after it in %s mode (#5988)',
+  (_case, mode) => {
+    try {
+      render(
+        <InteractiveResponse elements={[passageCite]} mode={mode}>
+          {
+            'Aspirin lowers the risk.\n\n<passage-cite passage="pubmed:1" />\n\nIt works in adults.'
+          }
+        </InteractiveResponse>,
+      );
 
-    const cites = screen.getAllByTestId('cite');
-    expect({
-      paragraphs: cites.map((cite) => cite.closest('p')),
-      nested: cites[0]?.contains(cites[1] ?? null),
-    }).toEqual({ paragraphs: [null, null], nested: false });
-  } finally {
-    cleanup();
-  }
-});
+      const cite = screen.getByTestId('cite');
+      const after = screen.queryByText('It works in adults.');
+      expect({
+        children: cite.dataset.children,
+        after: after?.tagName,
+        afterInsideCite: cite.contains(after),
+      }).toEqual({ children: 'none', after: 'P', afterInsideCite: false });
+    } finally {
+      cleanup();
+    }
+  },
+);
+
+test.each([
+  ['static', 'static'],
+  ['the chat’s streaming', undefined],
+] as const)(
+  'self-closing elements on lines of their own stay blocks, outside any paragraph, in %s mode',
+  (_case, mode) => {
+    try {
+      render(
+        <InteractiveResponse elements={[passageCite]} mode={mode}>
+          {
+            '<passage-cite passage="pubmed:1" />\n<passage-cite passage="pubmed:2" />'
+          }
+        </InteractiveResponse>,
+      );
+
+      const cites = screen.getAllByTestId('cite');
+      expect({
+        paragraphs: cites.map((cite) => cite.closest('p')),
+        nested: cites[0]?.contains(cites[1] ?? null),
+      }).toEqual({ paragraphs: [null, null], nested: false });
+    } finally {
+      cleanup();
+    }
+  },
+);
+
+function BoxProbe(props: Record<string, unknown> & { children?: ReactNode }) {
+  return <section data-testid="box">{props.children}</section>;
+}
+
+test.each([
+  ['static', 'static'],
+  ['the chat’s streaming', undefined],
+] as const)(
+  'a paired element on the lines between two lines of text renders the markdown inside it and keeps the text after it a paragraph in %s mode (#5988)',
+  (_case, mode) => {
+    try {
+      render(
+        <InteractiveResponse
+          elements={[
+            { name: 'box-probe', component: BoxProbe, allowedAttributes: [] },
+          ]}
+          mode={mode}
+        >
+          {
+            'Before the box.\n<box-probe>\n**Bold** body\n</box-probe>\nAfter the box.'
+          }
+        </InteractiveResponse>,
+      );
+
+      const box = screen.getByTestId('box');
+      const after = screen.queryByText('After the box.');
+      expect({
+        bold: box.querySelector('[data-streamdown="strong"], strong')
+          ?.textContent,
+        body: box.textContent?.trim(),
+        before: screen.queryByText('Before the box.')?.tagName,
+        after: after?.tagName,
+        afterInsideBox: box.contains(after),
+      }).toEqual({
+        bold: 'Bold',
+        body: 'Bold body',
+        before: 'P',
+        after: 'P',
+        afterInsideBox: false,
+      });
+    } finally {
+      cleanup();
+    }
+  },
+);
 
 // The first cited paragraph of a real Meddit answer (#5911): three bold spans
 // and a citation in one paragraph.

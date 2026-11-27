@@ -130,7 +130,10 @@ function wrapElements(
         out +=
           '<span>' + tag.slice(0, -2).trimEnd() + '></' + tagName + '></span>';
       } else {
-        out += tag;
+        // Written as a pair for the same reason, which a whole-document parse
+        // (static mode) would otherwise show: the rest of the answer as its
+        // children. A copy of the pairing above (strike 2, #6005).
+        out += tag.slice(0, -2).trimEnd() + '></' + tagName + '>';
         // A tag alone on its line is a block. Text on the next line needs a
         // blank line between, or the parser makes that text the tag's child.
         if (
@@ -173,13 +176,26 @@ function wrapElements(
     if (nested) {
       out += '<div>' + openTag + processedInner + closeTag + '</div>';
     } else {
+      // Streamdown renders the markdown inside a multi-line custom tag only
+      // when the tag starts its line, so the wrapper opens on a line of its own.
+      const lineBreak = processedInner.includes('\n') ? '\n' : '';
       out =
         ensureBlankLine(out) +
         '<div>' +
+        lineBreak +
         openTag +
         processedInner +
         closeTag +
+        lineBreak +
         '</div>';
+      // Copy of the self-closing block's check above (strike 2, #6005): text
+      // on the next line needs a blank line, or it renders inside this block.
+      if (
+        input[close.end] === '\n' &&
+        close.end + 1 < input.length &&
+        input[close.end + 1] !== '\n'
+      )
+        out += '\n';
     }
     i = close.end;
   }
