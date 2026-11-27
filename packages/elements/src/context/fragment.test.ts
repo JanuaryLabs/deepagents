@@ -1,41 +1,60 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isFragment } from '@deepagents/context';
+import { XmlRenderer } from '@deepagents/context';
 import { elementsFragment } from '@deepagents/elements/context';
 
 describe('elementsFragment', () => {
-  it('wraps descriptors into structured element child fragments', () => {
-    const fragment = elementsFragment([
-      {
-        name: 'followup',
-        allowedAttributes: ['question'],
-        description: 'Suggest a follow-up question',
-      },
-      { name: 'kpi', allowedAttributes: ['title', 'value'] },
+  it('shows the model the tag syntax as real tags, not HTML entities', () => {
+    const prompt = new XmlRenderer().render([
+      elementsFragment([{ name: 'followup', allowedAttributes: ['question'] }]),
     ]);
 
-    assert.equal(fragment.name, 'elements');
-    const children = fragment.data;
-    assert.ok(Array.isArray(children) && children.every(isFragment));
-    assert.equal(children.length, 3);
-    assert.equal(children[0].name, 'instructions');
-    assert.match(String(children[0].data), /Never invent elements/);
-    assert.deepEqual(children[1], {
-      name: 'element',
-      data: {
-        name: 'followup',
-        description: 'Suggest a follow-up question',
-        'allowed-attributes': 'question',
-      },
-    });
-    assert.deepEqual(children[2], {
-      name: 'element',
-      data: {
-        name: 'kpi',
-        'allowed-attributes': 'title, value',
-      },
-    });
+    assert.ok(prompt.includes('`<element-name attribute="value" />`'));
+    assert.doesNotMatch(prompt, /&lt;|&gt;|&quot;|&apos;/);
+  });
+
+  it('lists each declared element with its description and allowed attributes', () => {
+    const prompt = new XmlRenderer().render([
+      elementsFragment([
+        {
+          name: 'followup',
+          allowedAttributes: ['question'],
+          description: 'Suggest a follow-up question',
+        },
+        { name: 'kpi', allowedAttributes: ['title', 'value'] },
+      ]),
+    ]);
+
+    assert.ok(
+      prompt.includes(
+        [
+          '  <element>',
+          '    <name>followup</name>',
+          '    <description>Suggest a follow-up question</description>',
+          '    <allowed-attributes>question</allowed-attributes>',
+          '  </element>',
+          '  <element>',
+          '    <name>kpi</name>',
+          '    <allowed-attributes>title, value</allowed-attributes>',
+          '  </element>',
+          '</elements>',
+        ].join('\n'),
+      ),
+    );
+  });
+
+  it('leaves the escaping of other fragments to the renderer', () => {
+    const prompt = new XmlRenderer().render([
+      elementsFragment([{ name: 'followup', allowedAttributes: ['question'] }]),
+      { name: 'hint', data: 'Write <b> & "quote" as text' },
+    ]);
+
+    assert.ok(
+      prompt.includes(
+        '<hint>Write &lt;b&gt; &amp; &quot;quote&quot; as text</hint>',
+      ),
+    );
   });
 
   it('exposes the descriptor snapshot on metadata without rendering it', () => {
@@ -54,14 +73,10 @@ describe('elementsFragment', () => {
     });
   });
 
-  it('produces an empty fragment for an empty catalog', () => {
-    const fragment = elementsFragment([]);
+  it('renders nothing for an empty catalog', () => {
+    const prompt = new XmlRenderer().render([elementsFragment([])]);
 
-    assert.deepEqual(fragment, {
-      name: 'elements',
-      data: [],
-      metadata: { elements: [] },
-    });
+    assert.equal(prompt, '');
   });
 
   it('is deterministic for identical input', () => {
