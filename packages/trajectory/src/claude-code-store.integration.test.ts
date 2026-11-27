@@ -6,6 +6,11 @@ import { dirname, join } from 'node:path';
 
 import { ClaudeCodeAdapter, ClaudeCodeStore } from '@deepagents/trajectory';
 
+/** chmod 000 cannot make a file unreadable to root, so these run only as another user. */
+const runsAsRoot =
+  process.getuid?.() === 0 &&
+  'root reads every file, so chmod 000 cannot lock one';
+
 const A = '7f1c2a90-0000-4000-8000-0000000000a1';
 const B = '7f1c2a90-0000-4000-8000-0000000000b2';
 const C = '7f1c2a90-0000-4000-8000-0000000000c3';
@@ -60,27 +65,31 @@ test('sessions({ since }) lists main transcripts changed since the date, newest 
   assert.deepEqual(listed, [C, B]);
 });
 
-test('listing reads no transcript content, so a transcript the process cannot read is still listed', async () => {
-  await using dir = await new TemporaryFiles().directory('trajectory-');
-  const locked = await transcript(dir.path, '-work-one', A);
-  await touch(locked, '2026-11-26T00:00:00Z');
-  await chmod(locked, 0o000);
+test(
+  'listing reads no transcript content, so a transcript the process cannot read is still listed',
+  { skip: runsAsRoot },
+  async () => {
+    await using dir = await new TemporaryFiles().directory('trajectory-');
+    const locked = await transcript(dir.path, '-work-one', A);
+    await touch(locked, '2026-11-26T00:00:00Z');
+    await chmod(locked, 0o000);
 
-  try {
-    const listed = await Array.fromAsync(
-      new ClaudeCodeStore({
-        root: dir.path,
-      }).sessions({
-        since: new Date('2026-11-01T00:00:00Z'),
-      }),
-      (session) => session.sessionId,
-    );
+    try {
+      const listed = await Array.fromAsync(
+        new ClaudeCodeStore({
+          root: dir.path,
+        }).sessions({
+          since: new Date('2026-11-01T00:00:00Z'),
+        }),
+        (session) => session.sessionId,
+      );
 
-    assert.deepEqual(listed, [A]);
-  } finally {
-    await chmod(locked, 0o600);
-  }
-});
+      assert.deepEqual(listed, [A]);
+    } finally {
+      await chmod(locked, 0o600);
+    }
+  },
+);
 
 test('a store whose root holds no projects folder lists nothing', async () => {
   await using dir = await new TemporaryFiles().directory('trajectory-');
@@ -95,11 +104,11 @@ test('a store whose root holds no projects folder lists nothing', async () => {
   assert.deepEqual(listed, []);
 });
 
-test('chain() follows derived-from back across projects, oldest first, and a resume that names itself ends it', async () => {
+test('chain() follows derived-from back across projects whatever its via, oldest first, and a resume that names itself ends it', async () => {
   await using dir = await new TemporaryFiles().directory('trajectory-');
   const first = await transcript(dir.path, '-work-one', A);
   const second = await transcript(dir.path, '-work-two', B, [
-    derivedFrom(B, A, 'clear'),
+    derivedFrom(B, A, 'resume'),
   ]);
   const third = await transcript(dir.path, '-work-two', C, [
     derivedFrom(C, B, 'clear'),
@@ -216,3 +225,47 @@ async function touch(path: string, iso: string): Promise<void> {
   const time = new Date(iso);
   await utimes(path, time, time);
 }
+
+test('chain() follows every session one derived-from entry names', async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  const a = await transcript(dir.path, '-work-one', A);
+  const b = await transcript(dir.path, '-work-one', B);
+  const c = await transcript(dir.path, '-work-one', C, [
+    {
+      type: 'derived-from',
+      v: 1,
+      sessionId: C,
+      sessions: [
+        { type: 'claude_code_session', id: A, via: 'clear' },
+        { type: 'claude_code_session', id: B, via: 'clear' },
+      ],
+    },
+  ]);
+  const store = new ClaudeCodeStore({ root: dir.path });
+  const latest = await store.session(C);
+  assert.ok(latest);
+
+  const { sessions, missing } = await store.chain(latest);
+
+  assert.deepEqual(missing, []);
+  assert.deepEqual(
+    sessions.map((session) => session.transcriptPath).toSorted(),
+    [a, b, c].toSorted(),
+  );
+  assert.equal(sessions.at(-1)?.transcriptPath, c);
+});
+
+test('chain() takes the transcript beside the current one when two projects hold the same id', async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  await transcript(dir.path, '-work-one', A);
+  const beside = await transcript(dir.path, '-work-two', A);
+  await transcript(dir.path, '-work-two', B, [derivedFrom(B, A, 'clear')]);
+  const store = new ClaudeCodeStore({ root: dir.path });
+  const latest = await store.session(B);
+  assert.ok(latest);
+  assert.ok(latest.transcriptPath.includes('-work-two'));
+
+  const { sessions } = await store.chain(latest);
+
+  assert.equal(sessions[0]?.transcriptPath, beside);
+});

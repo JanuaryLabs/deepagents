@@ -224,9 +224,10 @@ export default defineConfig(
       'no-restricted-imports': [
         'error',
         {
-          paths: ['node:os', 'os'].map((name) => ({
+          // The package needs nothing from either module, so banning the
+          // whole import also catches an aliased os.homedir or process.env.
+          paths: ['node:os', 'os', 'node:process', 'process'].map((name) => ({
             name,
-            importNames: ['homedir'],
             message:
               '@deepagents/trajectory takes its store root from the caller (ADR 0005).',
           })),

@@ -95,7 +95,7 @@ test('a rollout that names a parent thread groups under it and embeds as a linke
     dir.path,
     'sessions',
     CHILD,
-    conversation(CHILD, { parent: PARENT }),
+    conversation(CHILD, { parent: PARENT, prompt: 'check the docs' }),
     { zst: true },
   );
 
@@ -109,6 +109,12 @@ test('a rollout that names a parent thread groups under it and embeds as a linke
   const [embedded, ...others] = trajectory.subagent_trajectories ?? [];
   assert.equal(others.length, 0);
   assert.ok(embedded?.trajectory_id);
+  assert.deepEqual(
+    embedded.steps
+      .filter((step) => step.source === 'user')
+      .map((step) => step.message),
+    ['check the docs'],
+  );
   const refs = trajectory.steps.flatMap((step) =>
     (step.observation?.results ?? []).flatMap(
       (result) => result.subagent_trajectory_ref ?? [],
@@ -171,7 +177,13 @@ async function rollout(
 }
 
 /** One turn as Codex 0.167 writes it: meta, injected AGENTS.md, a typed prompt, a reply, a tool call and its output. */
-function conversation(threadId: string, { parent }: { parent?: string } = {}) {
+function conversation(
+  threadId: string,
+  {
+    parent,
+    prompt = 'fix the failing test',
+  }: { parent?: string; prompt?: string } = {},
+) {
   let ordinal = 0;
   const line = (type: string, payload: Record<string, unknown>) => ({
     timestamp: `2026-11-20T10:00:${String(ordinal).padStart(2, '0')}.000Z`,
@@ -218,7 +230,7 @@ function conversation(threadId: string, { parent }: { parent?: string } = {}) {
       type: 'message',
       id: `m-user-${threadId}`,
       role: 'user',
-      content: [{ type: 'input_text', text: 'fix the failing test' }],
+      content: [{ type: 'input_text', text: prompt }],
       internal_chat_message_metadata_passthrough: {
         ...turn,
         content_item_kinds: ['user.text'],

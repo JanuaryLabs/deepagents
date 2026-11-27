@@ -11,6 +11,11 @@ import {
   SessionReadError,
 } from '@deepagents/trajectory';
 
+/** chmod 000 cannot make a file unreadable to root, so these run only as another user. */
+const runsAsRoot =
+  process.getuid?.() === 0 &&
+  'root reads every file, so chmod 000 cannot lock one';
+
 test('a missing transcript throws SessionReadError with its path and the ENOENT cause', async () => {
   await using dir = await new TemporaryFiles().directory('trajectory-');
   const path = join(
@@ -33,29 +38,33 @@ test('a missing transcript throws SessionReadError with its path and the ENOENT 
   );
 });
 
-test('a transcript the process cannot read throws SessionReadError with the EACCES cause', async () => {
-  await using dir = await new TemporaryFiles().directory('trajectory-');
-  const path = join(dir.path, '7f1c2a90-0000-4000-8000-000000000002.jsonl');
-  await writeFile(path, `${JSON.stringify(typed('hello'))}\n`);
-  await chmod(path, 0o000);
+test(
+  'a transcript the process cannot read throws SessionReadError with the EACCES cause',
+  { skip: runsAsRoot },
+  async () => {
+    await using dir = await new TemporaryFiles().directory('trajectory-');
+    const path = join(dir.path, '7f1c2a90-0000-4000-8000-000000000002.jsonl');
+    await writeFile(path, `${JSON.stringify(typed('hello'))}\n`);
+    await chmod(path, 0o000);
 
-  try {
-    await assert.rejects(
-      () =>
-        new ClaudeCodeAdapter().read(
-          ClaudeCodeSession.fromTranscriptPath(path),
-        ),
-      (error: unknown) => {
-        assert.ok(error instanceof SessionReadError);
-        assert.equal(error.path, path);
-        assert.equal(codeOf(error.cause), 'EACCES');
-        return true;
-      },
-    );
-  } finally {
-    await chmod(path, 0o600);
-  }
-});
+    try {
+      await assert.rejects(
+        () =>
+          new ClaudeCodeAdapter().read(
+            ClaudeCodeSession.fromTranscriptPath(path),
+          ),
+        (error: unknown) => {
+          assert.ok(error instanceof SessionReadError);
+          assert.equal(error.path, path);
+          assert.equal(codeOf(error.cause), 'EACCES');
+          return true;
+        },
+      );
+    } finally {
+      await chmod(path, 0o600);
+    }
+  },
+);
 
 test('a directory where the transcript should be throws SessionReadError with the EISDIR cause', async () => {
   await using dir = await new TemporaryFiles().directory('trajectory-');
@@ -733,12 +742,14 @@ test('a session read alone is ATIF-v1.8 with its own id, the Claude Code version
     trajectory.steps.map((step) => step.step_id),
     [1, 2, 3],
   );
-  for (const step of trajectory.steps) {
-    assert.ok(
-      !Number.isNaN(Date.parse(String(step.timestamp))),
-      String(step.timestamp),
-    );
-  }
+  assert.deepEqual(
+    trajectory.steps.map((step) => step.timestamp),
+    [
+      '2026-11-27T10:00:00.000Z',
+      '2026-11-27T10:00:01.000Z',
+      '2026-11-27T10:00:03.000Z',
+    ],
+  );
 });
 
 test('final_metrics sums the agent steps tokens and counts the steps', async () => {
@@ -887,28 +898,32 @@ test('a subagent with no meta file is embedded but unlinked, with an unlinked_su
   );
 });
 
-test('a subagent transcript that cannot be read is an unreadable_subagent diagnostic, and the session still reads', async () => {
-  await using dir = await new TemporaryFiles().directory('trajectory-');
-  const { main, subagent } = await sessionWithSubagent(dir.path, {
-    meta: true,
-  });
-  await chmod(subagent, 0o000);
+test(
+  'a subagent transcript that cannot be read is an unreadable_subagent diagnostic, and the session still reads',
+  { skip: runsAsRoot },
+  async () => {
+    await using dir = await new TemporaryFiles().directory('trajectory-');
+    const { main, subagent } = await sessionWithSubagent(dir.path, {
+      meta: true,
+    });
+    await chmod(subagent, 0o000);
 
-  try {
-    const { trajectory, diagnostics } = await new ClaudeCodeAdapter().read(
-      ClaudeCodeSession.fromTranscriptPath(main),
-    );
+    try {
+      const { trajectory, diagnostics } = await new ClaudeCodeAdapter().read(
+        ClaudeCodeSession.fromTranscriptPath(main),
+      );
 
-    assert.equal(trajectory.steps.length, 2);
-    assert.equal(trajectory.subagent_trajectories, undefined);
-    assert.deepEqual(
-      diagnostics.map(({ code, path }) => ({ code, path })),
-      [{ code: 'unreadable_subagent', path: subagent }],
-    );
-  } finally {
-    await chmod(subagent, 0o600);
-  }
-});
+      assert.equal(trajectory.steps.length, 2);
+      assert.equal(trajectory.subagent_trajectories, undefined);
+      assert.deepEqual(
+        diagnostics.map(({ code, path }) => ({ code, path })),
+        [{ code: 'unreadable_subagent', path: subagent }],
+      );
+    } finally {
+      await chmod(subagent, 0o600);
+    }
+  },
+);
 
 test('a SubagentStop hook reads the subagent transcript as the root, under its parent session', async () => {
   await using dir = await new TemporaryFiles().directory('trajectory-');
@@ -942,6 +957,141 @@ test('building a session from a path touches no disk, so a path that does not ex
   assert.equal(subagent.sessionId, '7f1c2a90-0000-4000-8000-000000000022');
   await assert.rejects(
     () => new ClaudeCodeAdapter().read(subagent),
+    (error: unknown) =>
+      error instanceof SessionReadError && error.path === path,
+  );
+});
+
+test('the latest usage of a message becomes its metrics (synthetic: usage that grows while one message streams)', async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  const path = join(dir.path, '7f1c2a90-0000-4000-8000-000000000023.jsonl');
+  const first = assistant('msg-1', { type: 'text', text: 'Part one.' });
+  const second = assistant(
+    'msg-1',
+    { type: 'text', text: 'Part two.' },
+    { uuid: 'u-a-2' },
+  );
+  second.message.usage.output_tokens = 80;
+  await writeFile(
+    path,
+    [typed('hello'), first, second]
+      .map((entry) => JSON.stringify(entry))
+      .join('\n') + '\n',
+  );
+
+  const { trajectory } = await new ClaudeCodeAdapter().read(
+    ClaudeCodeSession.fromTranscriptPath(path),
+  );
+
+  const agent = trajectory.steps[1];
+  assert.ok(agent.source === 'agent');
+  assert.equal(agent.message, 'Part one.\nPart two.');
+  assert.equal(agent.metrics?.completion_tokens, 80);
+});
+
+test('parallel calls of one message each get their own result by id, in the order the results arrive, with is_error kept', async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  const path = join(dir.path, '7f1c2a90-0000-4000-8000-000000000024.jsonl');
+  const failed = toolResult('toolu-b', 'grep: no such file');
+  failed.message.content[0].is_error = true;
+  await writeFile(
+    path,
+    [
+      typed('look around'),
+      assistant('msg-1', {
+        type: 'tool_use',
+        id: 'toolu-a',
+        name: 'Bash',
+        input: { command: 'ls' },
+      }),
+      assistant(
+        'msg-1',
+        {
+          type: 'tool_use',
+          id: 'toolu-b',
+          name: 'Bash',
+          input: { command: 'grep x y' },
+        },
+        { uuid: 'u-a-2' },
+      ),
+      failed,
+      toolResult('toolu-a', 'README.md'),
+      assistant('msg-2', { type: 'text', text: 'Done.' }, { uuid: 'u-a-3' }),
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join('\n') + '\n',
+  );
+
+  const { trajectory, diagnostics } = await new ClaudeCodeAdapter().read(
+    ClaudeCodeSession.fromTranscriptPath(path),
+  );
+
+  assert.deepEqual(diagnostics, []);
+  const calling = trajectory.steps[1];
+  assert.ok(calling.source === 'agent');
+  assert.deepEqual(
+    calling.tool_calls?.map((call) => call.tool_call_id),
+    ['toolu-a', 'toolu-b'],
+  );
+  assert.deepEqual(
+    calling.observation?.results.map((result) => [
+      result.source_call_id,
+      result.content,
+      claudeCodeOf(result.extra).is_error,
+    ]),
+    [
+      ['toolu-b', 'grep: no such file', true],
+      ['toolu-a', 'README.md', false],
+    ],
+  );
+  assert.equal(trajectory.steps[2].observation, undefined);
+});
+
+test('every summary and every PR link is kept, in file order', async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  const id = '7f1c2a90-0000-4000-8000-000000000025';
+  const path = join(dir.path, `${id}.jsonl`);
+  const links = [
+    { type: 'pr-link', url: 'https://github.com/o/r/pull/7', sessionId: id },
+    { type: 'pr-link', url: 'https://github.com/o/r/pull/8', sessionId: id },
+  ];
+  await writeFile(
+    path,
+    [
+      typed('hello'),
+      { type: 'summary', summary: 'First part', leafUuid: 'u-typed-1' },
+      links[0],
+      { type: 'summary', summary: 'Second part', leafUuid: 'u-typed-1' },
+      links[1],
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join('\n') + '\n',
+  );
+
+  const { trajectory } = await new ClaudeCodeAdapter().read(
+    ClaudeCodeSession.fromTranscriptPath(path),
+  );
+
+  const claudeCode = claudeCodeOf(trajectory.extra);
+  assert.deepEqual(claudeCode.summaries, ['First part', 'Second part']);
+  assert.deepEqual(claudeCode.pr_links, links);
+});
+
+test('building a main session from a path touches no disk, so a missing transcript builds and fails only on read', async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  const path = join(
+    dir.path,
+    'projects',
+    '-gone',
+    '7f1c2a90-0000-4000-8000-000000000026.jsonl',
+  );
+
+  const session = ClaudeCodeSession.fromTranscriptPath(path);
+
+  assert.equal(session.sessionId, '7f1c2a90-0000-4000-8000-000000000026');
+  assert.equal(session.transcriptPath, path);
+  await assert.rejects(
+    () => new ClaudeCodeAdapter().read(session),
     (error: unknown) =>
       error instanceof SessionReadError && error.path === path,
   );
