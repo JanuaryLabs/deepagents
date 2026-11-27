@@ -16,10 +16,13 @@ import type { CitationSource } from '../chat/citations.ts';
 export function CitationPill({
   source,
   index,
+  labels = { source: `Source ${index}`, open: 'Open the source' },
   children,
 }: {
   source: CitationSource;
   index: number;
+  /** The pill's own words, in the host's language. */
+  labels?: { source: string; open: string };
   /** The host's own detail for this source, such as notices or attribution. */
   children?: ReactNode;
 }) {
@@ -31,16 +34,16 @@ export function CitationPill({
       <Popover>
         <PopoverTrigger
           openOnHover
-          aria-label={`Source ${index}`}
+          aria-label={labels.source}
           className="text-primary bg-primary/10 hover:bg-primary/20 focus-visible:ring-ring focus-visible:ring-offset-background inline-block rounded px-1 font-mono text-[10px] leading-tight transition-colors focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
         >
           {index}
         </PopoverTrigger>
         <PopoverContent className="w-72 gap-2 text-sm">
           <PopoverHeader>
-            <PopoverTitle>{source.title ?? site}</PopoverTitle>
+            <PopoverTitle dir="auto">{source.title ?? site}</PopoverTitle>
             {source.title ? (
-              <PopoverDescription>{site}</PopoverDescription>
+              <PopoverDescription dir="auto">{site}</PopoverDescription>
             ) : null}
           </PopoverHeader>
           {children}
@@ -50,7 +53,7 @@ export function CitationPill({
             rel="noopener noreferrer"
             className="text-primary underline"
           >
-            Open the source
+            {labels.open}
           </a>
         </PopoverContent>
       </Popover>

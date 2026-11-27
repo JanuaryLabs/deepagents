@@ -86,3 +86,45 @@ test('a mouse user sees a citation’s detail on hover (#5929)', async () => {
     cleanup();
   }
 });
+
+test('in a right-to-left page a citation’s title and site take their own direction (#5946)', async () => {
+  const user = userEvent.setup();
+  try {
+    render(
+      <div dir="rtl">
+        <CitationPill source={source} index={5} />
+      </div>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Source 5' }));
+
+    expect(
+      [source.title, 'pubmed.ncbi.nlm.nih.gov'].map((text) =>
+        screen.getByText(text).closest('[dir]')?.getAttribute('dir'),
+      ),
+    ).toEqual(['auto', 'auto']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('a host gives a citation’s labels in its own language (#5946)', async () => {
+  const user = userEvent.setup();
+  try {
+    render(
+      <CitationPill
+        source={source}
+        index={6}
+        labels={{ source: 'المصدر ٦', open: 'افتح المصدر' }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'المصدر ٦' }));
+
+    expect(
+      screen.getByRole('link', { name: 'افتح المصدر' }).getAttribute('href'),
+    ).toBe(source.url);
+  } finally {
+    cleanup();
+  }
+});
