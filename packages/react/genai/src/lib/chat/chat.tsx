@@ -9,9 +9,6 @@ import {
   type ChatOnDataCallback,
   type ChatOnFinishCallback,
   type ChatTransport,
-  type UIDataTypes,
-  type UIMessage,
-  type UITools,
   lastAssistantMessageIsCompleteWithApprovalResponses,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from 'ai';
@@ -23,10 +20,9 @@ import * as React from 'react';
 import { useGenaiMessages } from '../i18n/provider.tsx';
 import type { ComponentRegistry } from '../tools/registry.ts';
 import { useAgentMeta } from './agent-context.tsx';
+import type { AgentUIMessage } from './agent-ui-message.ts';
 import { ChatBotScrollerContext } from './chat-bot-scroller.ts';
 import { completeRenderedClientTool } from './client-tool-output.ts';
-
-type AgentUIMessage = UIMessage<unknown, UIDataTypes, UITools>;
 
 interface AgentChatSetupProps {
   chatId: string;

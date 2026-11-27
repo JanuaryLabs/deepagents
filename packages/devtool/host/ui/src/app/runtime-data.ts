@@ -27,6 +27,7 @@ const discoverySchema = z.object({
             ]),
           )
           .optional(),
+        maxBytes: z.number().int().positive(),
       })
       .optional(),
   }),

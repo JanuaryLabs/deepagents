@@ -67,3 +67,54 @@ test('AttachFiles exposes a hidden media file input and Attachments lists what w
     cleanup();
   }
 });
+
+test('a file over maxUploadBytes is refused with the size in words and attaches nothing', async () => {
+  const user = userEvent.setup();
+  try {
+    render(
+      <ClockProvider clock={createClock()}>
+        <AgentProvider
+          chatId="chat-1"
+          transport={new ZukhrufChatTransport({ api: '/sessions' })}
+          onResetChat={() => {}}
+        >
+          <ChatComposer.Provider maxUploadBytes={5_000_000}>
+            <ChatComposer.Root>
+              <ChatComposer.Content>
+                <ChatComposer.Attachments />
+                <ChatComposer.Editor placeholder="Message" />
+                <ChatComposer.Error />
+              </ChatComposer.Content>
+              <ChatComposer.Toolbar>
+                <ChatComposer.AttachFiles />
+              </ChatComposer.Toolbar>
+            </ChatComposer.Root>
+          </ChatComposer.Provider>
+        </AgentProvider>
+      </ClockProvider>,
+    );
+    const input = screen.getByLabelText<HTMLInputElement>('Attach media files');
+
+    await user.upload(
+      input,
+      new File([new Uint8Array(5_000_001)], 'scan.png', { type: 'image/png' }),
+    );
+    const named = (await screen.findByRole('alert')).textContent;
+    await user.upload(
+      input,
+      new File([new Uint8Array(5_000_001)], '', { type: 'image/png' }),
+    );
+
+    expect({
+      named,
+      unnamed: screen.getByRole('alert').textContent,
+      attached: screen.queryByRole('list', { name: 'Attached files' }),
+    }).toEqual({
+      named: 'Files over 5 MB cannot be attached: scan.png',
+      unnamed: 'Files over 5 MB cannot be attached: unnamed file',
+      attached: null,
+    });
+  } finally {
+    cleanup();
+  }
+});

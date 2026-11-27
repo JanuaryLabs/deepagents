@@ -1,9 +1,10 @@
-import { APICallError, DefaultChatTransport, type UIMessage } from 'ai';
+import { APICallError, DefaultChatTransport } from 'ai';
 import { z } from 'zod';
 
 import { type ElementDescriptor, toDescriptor } from '@deepagents/elements';
 
 import type { GenAIInteractiveElement } from '../elements/interactive-element.ts';
+import type { AgentUIMessage } from './agent-ui-message.ts';
 import type { SerializedToolRegistry } from './tools-schema.ts';
 
 /** Carries the URI-encoded original filename alongside the raw upload body. */
@@ -47,7 +48,7 @@ type AcceptedTurn = {
   turnId: string;
 };
 
-export class ZukhrufChatTransport extends DefaultChatTransport<UIMessage> {
+export class ZukhrufChatTransport extends DefaultChatTransport<AgentUIMessage> {
   private readonly sessionsApi: string;
   private readonly request: typeof globalThis.fetch;
 

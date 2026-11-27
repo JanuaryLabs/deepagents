@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
+import type { ChatDataTypes } from '@deepagents/context';
 import {
   AgentProvider,
   CompactMessages,
@@ -12,11 +13,13 @@ import {
   useAgentMessages,
 } from '@deepagents/react-genai';
 
-class IdleTransport implements ChatTransport<UIMessage> {
-  sendMessages: ChatTransport<UIMessage>['sendMessages'] = () =>
+type ChatMessage = UIMessage<unknown, ChatDataTypes>;
+
+class IdleTransport implements ChatTransport<ChatMessage> {
+  sendMessages: ChatTransport<ChatMessage>['sendMessages'] = () =>
     Promise.reject(new Error('No sends expected'));
 
-  reconnectToStream: ChatTransport<UIMessage>['reconnectToStream'] = () =>
+  reconnectToStream: ChatTransport<ChatMessage>['reconnectToStream'] = () =>
     Promise.resolve(null);
 
   uploadFile = async (sessionId: string, file: File) => ({
@@ -44,7 +47,7 @@ function CompactHarness() {
 }
 
 function renderChat(
-  parts: UIMessage['parts'],
+  parts: ChatMessage['parts'],
   children: ReactNode,
   options: { registry?: ComponentRegistry; debugMode?: boolean } = {},
 ) {

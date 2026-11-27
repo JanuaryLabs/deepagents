@@ -3,6 +3,7 @@ import { userEvent } from '@testing-library/user-event';
 import type { ChatTransport, UIMessage } from 'ai';
 import { expect, test } from 'vitest';
 
+import type { ChatDataTypes } from '@deepagents/context';
 import {
   AgentProvider,
   CompactMessages,
@@ -10,11 +11,13 @@ import {
   useAgentMessages,
 } from '@deepagents/react-genai';
 
-class IdleTransport implements ChatTransport<UIMessage> {
-  sendMessages: ChatTransport<UIMessage>['sendMessages'] = () =>
+type ChatMessage = UIMessage<unknown, ChatDataTypes>;
+
+class IdleTransport implements ChatTransport<ChatMessage> {
+  sendMessages: ChatTransport<ChatMessage>['sendMessages'] = () =>
     Promise.reject(new Error('No send expected'));
 
-  reconnectToStream: ChatTransport<UIMessage>['reconnectToStream'] = () =>
+  reconnectToStream: ChatTransport<ChatMessage>['reconnectToStream'] = () =>
     Promise.resolve(null);
 
   uploadFile = async (sessionId: string, file: File) => ({
@@ -36,7 +39,7 @@ const registry: ComponentRegistry = {
   },
 };
 
-const approvalMessage: UIMessage = {
+const approvalMessage: ChatMessage = {
   id: 'approval-request',
   role: 'assistant',
   parts: [

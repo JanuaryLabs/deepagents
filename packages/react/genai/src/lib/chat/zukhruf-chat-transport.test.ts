@@ -1,10 +1,13 @@
 import { APICallError, type UIMessage, type UIMessageChunk } from 'ai';
 import { expect, it, vi } from 'vitest';
 
+import type { ChatDataTypes } from '@deepagents/context';
 import {
   type SerializedToolRegistry,
   ZukhrufChatTransport,
 } from '@deepagents/react-genai';
+
+type ChatMessage = UIMessage<unknown, ChatDataTypes>;
 
 const api = '/zukhruf/v1/session';
 const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
@@ -58,7 +61,7 @@ it('creates, continues, streams, and cancels a session', async () => {
     fetch: request,
     tools,
   });
-  const message: UIMessage = {
+  const message: ChatMessage = {
     id: 'message-1',
     role: 'user',
     parts: [
@@ -96,7 +99,7 @@ it('creates, continues, streams, and cancels a session', async () => {
   expect(requests[0].headers.get('idempotency-key')).toBeNull();
   expect(requests[1].url).toBe(`${api}/${sessionId}/stream`);
 
-  const continuation: UIMessage = {
+  const continuation: ChatMessage = {
     id: 'message-2',
     role: 'user',
     parts: [{ type: 'text', text: 'Continue' }],

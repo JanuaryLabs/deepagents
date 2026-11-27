@@ -1,9 +1,9 @@
-import type { UIMessage, UseChatHelpers } from '@ai-sdk/react';
-import type { UIDataTypes, UITools } from 'ai';
+import type { UseChatHelpers } from '@ai-sdk/react';
 
 import type { ComponentRegistry } from '../tools/registry.ts';
+import type { AgentUIMessage } from './agent-ui-message.ts';
 
-type ChatHelpers = UseChatHelpers<UIMessage<unknown, UIDataTypes, UITools>>;
+type ChatHelpers = UseChatHelpers<AgentUIMessage>;
 
 interface ToolCall {
   toolCallId: string;

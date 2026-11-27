@@ -85,12 +85,30 @@ type AnyMessage =
   | string
   | { render(args: unknown, helpers: GenaiMessageHelpers): string }['render'];
 
+const byteUnits = [
+  ['gigabyte', 1e9],
+  ['megabyte', 1e6],
+  ['kilobyte', 1e3],
+] as const;
+
 export function useGenaiMessages(): GenaiTranslate {
   const { locale, messages } = use(GenaiMessagesContext);
   const rules = new Intl.PluralRules(locale);
   const numbers = new Intl.NumberFormat(locale);
   const helpers: GenaiMessageHelpers = {
     format: (value) => numbers.format(value),
+    bytes: (value) => {
+      const [unit, scale] = byteUnits.find(([, size]) => value >= size) ?? [
+        'byte',
+        1,
+      ];
+      return new Intl.NumberFormat(locale, {
+        style: 'unit',
+        unit,
+        maximumFractionDigits: 1,
+        roundingMode: 'trunc',
+      }).format(value / scale);
+    },
     plural: (count, forms) =>
       (forms[rules.select(count)] ?? forms.other).replaceAll(
         '#',

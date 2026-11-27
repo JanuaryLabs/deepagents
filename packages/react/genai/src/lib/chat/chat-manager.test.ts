@@ -1,16 +1,11 @@
 import { type UseChatHelpers, useChat } from '@ai-sdk/react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { StreamHarness, type StreamSource } from '@zukhruf/testing/streams';
-import type {
-  ChatStatus,
-  ChatTransport,
-  UIDataTypes,
-  UIMessage,
-  UIMessageChunk,
-  UITools,
-} from 'ai';
+import type { ChatStatus, ChatTransport, UIMessage, UIMessageChunk } from 'ai';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
+
+import type { ChatDataTypes } from '@deepagents/context';
 
 import {
   ChatManager,
@@ -22,7 +17,7 @@ import { useAgentChatSetup } from './chat.tsx';
 import { prefillTransport } from './prefill-transport.ts';
 import { type PendingPrefill, writePrefill } from './prefill.ts';
 
-type TestUIMessage = UIMessage<unknown, UIDataTypes, UITools>;
+type TestUIMessage = UIMessage<unknown, ChatDataTypes>;
 type TestChatHelpers = UseChatHelpers<TestUIMessage>;
 
 const PREFILL_STORAGE_KEY = 'pending-chat-prefill';

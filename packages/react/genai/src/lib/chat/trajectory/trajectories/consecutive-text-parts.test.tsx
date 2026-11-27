@@ -5,18 +5,22 @@ import { ClockProvider } from '@zukhruf/ui';
 import type { Citation, UIMessage, UIMessageChunk } from 'ai';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { ChatDataTypes } from '@deepagents/context';
+
 import { citedAnswers } from '../../../../testing/cited-answers.ts';
 import { StoredMessagesTransport } from '../../../../testing/stored-messages-transport.ts';
 import { AgentProvider, useAgentMessages } from '../../agent-context.tsx';
 import { CompactMessages } from './compact-messages.tsx';
 
-const question: UIMessage = {
+type ChatMessage = UIMessage<unknown, ChatDataTypes>;
+
+const question: ChatMessage = {
   id: 'question',
   role: 'user',
   parts: [{ type: 'text', text: 'How long does the paint take to dry?' }],
 };
 
-function Chat({ messages }: { messages: UIMessage[] }) {
+function Chat({ messages }: { messages: ChatMessage[] }) {
   return (
     <CompactMessages.Root messages={messages}>
       {messages.map((message, index) => (
@@ -38,8 +42,8 @@ function Chat({ messages }: { messages: UIMessage[] }) {
 }
 
 /** The answer as stored history draws it: the chat is idle. */
-function renderStatic(parts: UIMessage['parts']) {
-  const answer: UIMessage = { id: 'answer', role: 'assistant', parts };
+function renderStatic(parts: ChatMessage['parts']) {
+  const answer: ChatMessage = { id: 'answer', role: 'assistant', parts };
   render(
     <ClockProvider clock={createClock()}>
       <AgentProvider
@@ -54,7 +58,7 @@ function renderStatic(parts: UIMessage['parts']) {
 }
 
 /** The stream the AI SDK reads for `parts`: each text part streams in small deltas and gets its citations at its text-end, as ai 7 gives them. */
-function chunksOf(parts: UIMessage['parts']): UIMessageChunk[] {
+function chunksOf(parts: ChatMessage['parts']): UIMessageChunk[] {
   return [
     { type: 'start', messageId: 'answer' },
     { type: 'start-step' },
@@ -93,7 +97,7 @@ class OpenStreamTransport extends StoredMessagesTransport {
   readonly #chunks: UIMessageChunk[];
   readonly #open: ReadableStreamDefaultController<UIMessageChunk>[] = [];
 
-  constructor(parts: UIMessage['parts']) {
+  constructor(parts: ChatMessage['parts']) {
     super();
     this.#chunks = chunksOf(parts);
   }
@@ -129,7 +133,7 @@ function LiveChat() {
 /** The answer while the model still streams it: every part has arrived, the stream is still open. */
 async function renderStreaming(
   stack: DisposableStack,
-  parts: UIMessage['parts'],
+  parts: ChatMessage['parts'],
 ) {
   const transport = new OpenStreamTransport(parts);
   stack.defer(() => transport.close());
@@ -195,7 +199,7 @@ async function copyAnswer(copied: string[]) {
 }
 
 /** The one-part answer, drawn and copied as stored history: what the split answer must match. */
-async function oneBlockAnswer(parts: UIMessage['parts']) {
+async function oneBlockAnswer(parts: ChatMessage['parts']) {
   using stack = new DisposableStack();
   stack.defer(cleanup);
   const copied = stubClipboard(stack);
@@ -229,7 +233,7 @@ const anthropicCitation: Citation = {
   },
   citedText: 'Allow 2.5 hours between coats when the room is cold or damp',
 };
-const anthropicSplit: UIMessage['parts'] = [
+const anthropicSplit: ChatMessage['parts'] = [
   {
     type: 'text',
     text: 'For most walls wait **5 hours between coats**; ',

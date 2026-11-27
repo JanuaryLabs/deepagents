@@ -1,11 +1,9 @@
-import { type UIMessage, type UseChatHelpers } from '@ai-sdk/react';
+import type { UseChatHelpers } from '@ai-sdk/react';
 import type {
   ChatOnDataCallback,
   ChatOnFinishCallback,
   ChatStatus,
   ChatTransport,
-  UIDataTypes,
-  UITools,
 } from 'ai';
 import {
   type ReactNode,
@@ -19,6 +17,7 @@ import {
 } from 'react';
 
 import type { ComponentRegistry } from '../tools/registry.ts';
+import type { AgentUIMessage } from './agent-ui-message.ts';
 import { ChatManager, type ChatSubmission } from './chat-manager.ts';
 import { useAgentChatSetup } from './chat.tsx';
 import { prefillTransport } from './prefill-transport.ts';
@@ -33,8 +32,8 @@ export interface AgentConfigContextValue {
   resetChat: (prompt?: string) => void;
   /** Settles once the submission is queued or sent; rejects when a file upload fails. */
   submit: (submission: ChatSubmission) => Promise<void>;
-  setChat: (messages: UIMessage[]) => void;
-  getTriggeringUserMessage: (toolCallId: string) => UIMessage | null;
+  setChat: (messages: AgentUIMessage[]) => void;
+  getTriggeringUserMessage: (toolCallId: string) => AgentUIMessage | null;
   getLastUserMessageId: () => string | null;
   /**
    * Stops the answer at once and resolves once the server has cancelled its
@@ -44,9 +43,7 @@ export interface AgentConfigContextValue {
   stop: () => Promise<void>;
 }
 
-type AgentMessagesContextValue = UseChatHelpers<
-  UIMessage<unknown, UIDataTypes, UITools>
->;
+type AgentMessagesContextValue = UseChatHelpers<AgentUIMessage>;
 
 const AgentConfigContext = createContext<AgentConfigContextValue | undefined>(
   undefined,
@@ -78,15 +75,15 @@ export function AgentProvider({
   skipInitialView?: boolean;
   debugMode?: boolean;
   registry?: ComponentRegistry;
-  initialMessages?: UIMessage[];
-  transport: ChatTransport<UIMessage<unknown, UIDataTypes, UITools>> &
+  initialMessages?: AgentUIMessage[];
+  transport: ChatTransport<AgentUIMessage> &
     Pick<ZukhrufChatTransport, 'uploadFile' | 'cancel'>;
   /** Enable the AI SDK's automatic stream resumption. */
   resume?: boolean;
   /** Observes every streamed data part, transient ones included. */
-  onData?: ChatOnDataCallback<UIMessage<unknown, UIDataTypes, UITools>>;
+  onData?: ChatOnDataCallback<AgentUIMessage>;
   /** Observes response termination; inspect isAbort, isDisconnect, and isError. */
-  onFinish?: ChatOnFinishCallback<UIMessage<unknown, UIDataTypes, UITools>>;
+  onFinish?: ChatOnFinishCallback<AgentUIMessage>;
   onResetChat: (chatId: string) => void;
 }) {
   const sendingTransport = useMemo(
@@ -132,7 +129,7 @@ export function AgentProvider({
       clearChat: () => manager.clearChat(),
       resetChat: (prompt?: string) => manager.resetChat(prompt),
       submit: (submission: ChatSubmission) => manager.submit(submission),
-      setChat: (messages: UIMessage[]) => manager.setChat(messages),
+      setChat: (messages: AgentUIMessage[]) => manager.setChat(messages),
       getTriggeringUserMessage: (id: string) =>
         manager.getTriggeringUserMessage(id),
       getLastUserMessageId: () => manager.getLastUserMessageId(),

@@ -3,18 +3,21 @@ import { userEvent } from '@testing-library/user-event';
 import type { ChatTransport, UIMessage } from 'ai';
 import { expect, test, vi } from 'vitest';
 
+import type { ChatDataTypes } from '@deepagents/context';
 import {
   AgentProvider,
   CompactMessages,
   useAgentMessages,
 } from '@deepagents/react-genai';
 
-type SendRequest = Parameters<ChatTransport<UIMessage>['sendMessages']>[0];
+type ChatMessage = UIMessage<unknown, ChatDataTypes>;
 
-class RecordingTransport implements ChatTransport<UIMessage> {
+type SendRequest = Parameters<ChatTransport<ChatMessage>['sendMessages']>[0];
+
+class RecordingTransport implements ChatTransport<ChatMessage> {
   readonly sends: SendRequest[] = [];
 
-  sendMessages: ChatTransport<UIMessage>['sendMessages'] = (request) => {
+  sendMessages: ChatTransport<ChatMessage>['sendMessages'] = (request) => {
     this.sends.push({
       ...request,
       messages: structuredClone(request.messages),
@@ -22,7 +25,7 @@ class RecordingTransport implements ChatTransport<UIMessage> {
     return Promise.reject(new Error('Approval continuation recorded'));
   };
 
-  reconnectToStream: ChatTransport<UIMessage>['reconnectToStream'] = () =>
+  reconnectToStream: ChatTransport<ChatMessage>['reconnectToStream'] = () =>
     Promise.resolve(null);
 
   uploadFile = async (sessionId: string, file: File) => ({
@@ -36,7 +39,7 @@ class RecordingTransport implements ChatTransport<UIMessage> {
   cancel = async () => {};
 }
 
-const approvalMessage: UIMessage = {
+const approvalMessage: ChatMessage = {
   id: 'approval-request',
   role: 'assistant',
   parts: [
@@ -53,7 +56,7 @@ const approvalMessage: UIMessage = {
   ],
 };
 
-const terminalErrorMessage: UIMessage = {
+const terminalErrorMessage: ChatMessage = {
   id: 'terminal-tool-error',
   role: 'assistant',
   parts: [
@@ -81,7 +84,7 @@ function ApprovalHarness() {
   );
 }
 
-function renderMessage(message: UIMessage, transport: RecordingTransport) {
+function renderMessage(message: ChatMessage, transport: RecordingTransport) {
   return render(
     <AgentProvider
       chatId="render-part-test"

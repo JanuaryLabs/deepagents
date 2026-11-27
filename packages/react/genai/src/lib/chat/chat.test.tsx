@@ -6,6 +6,8 @@ import { HttpResponse, http } from 'msw';
 import { StrictMode, useState } from 'react';
 import { expect, test, vi } from 'vitest';
 
+import type { ChatDataTypes } from '@deepagents/context';
+
 import {
   AgentProvider,
   useAgent,
@@ -16,16 +18,18 @@ import { persistedPromptOf } from './chat-manager.ts';
 import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
 import { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
 
-type SendRequest = Parameters<ChatTransport<UIMessage>['sendMessages']>[0];
+type ChatMessage = UIMessage<unknown, ChatDataTypes>;
+
+type SendRequest = Parameters<ChatTransport<ChatMessage>['sendMessages']>[0];
 type ReconnectRequest = Parameters<
-  ChatTransport<UIMessage>['reconnectToStream']
+  ChatTransport<ChatMessage>['reconnectToStream']
 >[0];
 
 /**
  * The only stubbed seam: records every request the real `Chat` issues and
  * answers with an already-closed stream, so the status machine settles.
  */
-class RecordingTransport implements ChatTransport<UIMessage> {
+class RecordingTransport implements ChatTransport<ChatMessage> {
   readonly sends: SendRequest[] = [];
   readonly reconnects: ReconnectRequest[] = [];
   private readonly responses: UIMessageChunk[][];
@@ -35,7 +39,7 @@ class RecordingTransport implements ChatTransport<UIMessage> {
     this.responses = [...responses];
   }
 
-  sendMessages: ChatTransport<UIMessage>['sendMessages'] = (request) => {
+  sendMessages: ChatTransport<ChatMessage>['sendMessages'] = (request) => {
     this.sends.push(request);
     const chunks = this.responses.shift() ?? [];
     return Promise.resolve(
@@ -48,7 +52,7 @@ class RecordingTransport implements ChatTransport<UIMessage> {
     );
   };
 
-  reconnectToStream: ChatTransport<UIMessage>['reconnectToStream'] = (
+  reconnectToStream: ChatTransport<ChatMessage>['reconnectToStream'] = (
     request,
   ) => {
     this.reconnects.push(request);
@@ -123,7 +127,7 @@ function SubmitHarness() {
 
 /** Answers each send with a stream that stays open, and records its abort signal. */
 class HeldOpenTransport extends RecordingTransport {
-  override sendMessages: ChatTransport<UIMessage>['sendMessages'] = (
+  override sendMessages: ChatTransport<ChatMessage>['sendMessages'] = (
     request,
   ) => {
     this.sends.push(request);
@@ -139,7 +143,7 @@ class HeldOpenTransport extends RecordingTransport {
 class HeldStreamTransport extends RecordingTransport {
   private readonly open: ReadableStreamDefaultController<UIMessageChunk>[] = [];
 
-  override sendMessages: ChatTransport<UIMessage>['sendMessages'] = (
+  override sendMessages: ChatTransport<ChatMessage>['sendMessages'] = (
     request,
   ) => {
     this.sends.push(request);
@@ -221,7 +225,7 @@ function QueueProbe() {
   );
 }
 
-function textsOf(messages: readonly UIMessage[]): string {
+function textsOf(messages: readonly ChatMessage[]): string {
   return messages
     .map((message) =>
       message.parts
@@ -256,7 +260,7 @@ function ConversationProbe() {
   );
 }
 
-const greeting: UIMessage = {
+const greeting: ChatMessage = {
   id: 'u1',
   role: 'user',
   parts: [{ type: 'text', text: 'earlier question' }],
@@ -500,7 +504,7 @@ test('skipInitialView reports the conversation as started with no messages', () 
 
 test('a new chatId starts a chat seeded with the initialMessages of that render', () => {
   const transport = new RecordingTransport();
-  const other: UIMessage = {
+  const other: ChatMessage = {
     id: 'u2',
     role: 'user',
     parts: [{ type: 'text', text: 'other conversation' }],
@@ -830,7 +834,7 @@ async function postedQuestions(requests: readonly Request[]) {
   );
   return Promise.all(
     turns.map(async (request) => {
-      const body: { message: UIMessage } = await request.clone().json();
+      const body: { message: ChatMessage } = await request.clone().json();
       return textsOf([body.message]);
     }),
   );
@@ -1005,7 +1009,7 @@ test('a prefill is sent under the same message id on every attempt, so Zukhruf d
 
     const messageIds = await Promise.all(
       interception.requests.map(async (request) => {
-        const body: { message: UIMessage } = await request.clone().json();
+        const body: { message: ChatMessage } = await request.clone().json();
         return body.message.id;
       }),
     );
@@ -1329,7 +1333,7 @@ test('a prefill sent into a chat that already has history is not sent again afte
     ),
     answeringStream(),
   );
-  const history: UIMessage[] = [
+  const history: ChatMessage[] = [
     {
       id: 'earlier-question',
       role: 'user',

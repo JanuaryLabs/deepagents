@@ -1,5 +1,9 @@
 import type { UIMessage } from 'ai';
 
+import type { ChatDataTypes } from '@deepagents/context';
+
+type ChatMessage = UIMessage<unknown, ChatDataTypes>;
+
 /**
  * Three cited answers in the shape a consumer's recorded answers have, each
  * as two converters give it: one text part per agent text block, and one text
@@ -9,8 +13,8 @@ import type { UIMessage } from 'ai';
  */
 export const citedAnswers: {
   answer: string;
-  oneBlock: UIMessage['parts'];
-  perParagraph: UIMessage['parts'];
+  oneBlock: ChatMessage['parts'];
+  perParagraph: ChatMessage['parts'];
 }[] = [
   {
     answer: 'answer 1',

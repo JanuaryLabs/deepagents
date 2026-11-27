@@ -94,7 +94,7 @@ const ar: Partial<GenaiMessages> = {
 </GenaiMessagesProvider>;
 ```
 
-- A message is a string, or a function of its typed arguments and `{ plural, format }`. `plural(count, forms)` picks the form that `Intl.PluralRules` of the locale gives, needs `other`, and writes the count, formatted by `Intl.NumberFormat` of the locale, in place of `#`. A count sentence is one message, never pieces joined in code.
+- A message is a string, or a function of its typed arguments and `{ plural, format, bytes }`. `plural(count, forms)` picks the form that `Intl.PluralRules` of the locale gives, needs `other`, and writes the count, formatted by `Intl.NumberFormat` of the locale, in place of `#`. `bytes(value)` writes a size in the largest decimal unit it fills (`5 MB`, `512 kB`), cut to one decimal so it never says more than the limit. A count sentence is one message, never pieces joined in code.
 - A key the catalog leaves out keeps the English word.
 - `markdown` holds streamdown's words (`StreamdownTranslations` of `streamdown`) for every `Response`. A `translations` prop on a `Response` wins over it, key by key.
 - `dir` is the text direction of the locale (`Intl.Locale`) unless the host gives it. The provider hands it to Base UI's `DirectionProvider`, so popups and menus follow it. Text blocks keep `dir="auto"`, so an English answer in an Arabic chat still reads left to right.
@@ -111,6 +111,8 @@ Providers nest. An inner provider changes only the keys it gives, the `markdown`
 ```
 
 The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, ship no words of their own: `ChatComposer` fills them from the same catalog. An attachment is named by `composer.attachment({ media, number })` wherever the user sees it: its token in the editor, its preview, `composer.removeAttachment({ label })` and `composer.attachmentMissing({ label })`. The editor draws a pasted block as `composer.pastedText({ chars })`. Only the drawing changes: the prompt the model reads keeps the `[Image #N]` and `[Pasted Content N chars]` tokens, and a paste still expands to its text. When a submission fails, the alert shows `composer.uploadTooLarge` for an upload refused with 413, `composer.uploadUnsupported` for 415, `composer.uploadFailed` for any other refused upload, and `composer.sendFailed` for anything else; the server's own detail never reaches the page.
+
+`ChatComposer.Provider` refuses what the server would: `maxExpandedTextChars` refuses a send whose prompt, its pasted content expanded, is longer, with `composer.promptTooLong({ chars, maxChars })`, and `maxUploadBytes` refuses a picked, pasted or dropped file of more bytes, with `composer.fileTooLarge({ name, maxBytes })`, and uploads nothing. Pass the runtime's discovery, `capabilities.uploads.maxBytes`, as `maxUploadBytes`, beside its `mediaTypes` as `acceptedMediaTypes`.
 
 ## Scrolling
 

@@ -137,6 +137,10 @@ const ar: GenaiMessages = {
     };
     return `الطلب أطول من الحد بعد توسيع المحتوى الملصق (${plural(chars, forms)}، والحد ${plural(maxChars, forms)}).`;
   },
+  'composer.fileTooLarge': ({ name, maxBytes }, { bytes }) =>
+    name === undefined
+      ? `لا يمكن إرفاق ملف أكبر من ${bytes(maxBytes)}، وهذا الملف بلا اسم`
+      : `لا يمكن إرفاق ملف أكبر من ${bytes(maxBytes)}: ${name}`,
   'dictation.start': 'ابدأ الإملاء',
   'dictation.starting': 'يبدأ الإملاء',
   'dictation.stop': 'أوقف الإملاء',
@@ -701,6 +705,77 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
       named: 'يمكن إرفاق ملفات الصور والفيديو والصوت فقط: report.csv',
       unnamed: 'يمكن إرفاق ملفات الصور والفيديو والصوت فقط، وهذا الملف بلا اسم',
       command: 'أمر غير معروف: /nope',
+    });
+  });
+
+  it('translates why the composer refused a file over maxUploadBytes, with its name and without one, and attaches neither', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    function Sizes() {
+      const t = useGenaiMessages();
+      return [512_000, 5_290_000, 1_000_000_000].map((maxBytes) => (
+        <li key={maxBytes}>
+          {t('composer.fileTooLarge', { name: 'scan.png', maxBytes })}
+        </li>
+      ));
+    }
+    const user = userEvent.setup();
+    render(
+      inArabic(
+        <>
+          <ChatComposer.Provider
+            maxUploadBytes={5_000_000}
+            onSubmit={() => Promise.resolve()}
+          >
+            <ChatComposer.Root>
+              <ChatComposer.Content>
+                <ChatComposer.Attachments />
+                <ChatComposer.Editor />
+                <ChatComposer.Error />
+              </ChatComposer.Content>
+              <ChatComposer.Toolbar>
+                <ChatComposer.AttachFiles />
+              </ChatComposer.Toolbar>
+            </ChatComposer.Root>
+          </ChatComposer.Provider>
+          <ul aria-label="sizes">
+            <Sizes />
+          </ul>
+        </>,
+      ),
+      { wrapper: Harness },
+    );
+    const input = screen.getByLabelText(ar['composer.attachInput']);
+
+    await user.upload(
+      input,
+      new File([new Uint8Array(5_000_001)], 'scan.png', { type: 'image/png' }),
+    );
+    const named = (await screen.findByRole('alert')).textContent;
+    await user.upload(
+      input,
+      new File([new Uint8Array(5_000_001)], '', { type: 'image/png' }),
+    );
+
+    expect({
+      named,
+      unnamed: screen.getByRole('alert').textContent,
+      attached: screen.queryByRole('list', {
+        name: ar['composer.attachments'],
+      }),
+      sizes: within(screen.getByRole('list', { name: 'sizes' }))
+        .getAllByRole('listitem')
+        .map((line) => line.textContent),
+    }).toEqual({
+      named: 'لا يمكن إرفاق ملف أكبر من 5 م.ب: scan.png',
+      unnamed: 'لا يمكن إرفاق ملف أكبر من 5 م.ب، وهذا الملف بلا اسم',
+      attached: null,
+      sizes: [
+        'لا يمكن إرفاق ملف أكبر من 512 كيلوبايت: scan.png',
+        'لا يمكن إرفاق ملف أكبر من 5.2 م.ب: scan.png',
+        'لا يمكن إرفاق ملف أكبر من 1 غ.ب: scan.png',
+      ],
     });
   });
 

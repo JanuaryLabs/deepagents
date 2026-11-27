@@ -64,6 +64,7 @@ type InstanceWords<Props, Words extends keyof Props> = Omit<Props, Words> &
 function ChatComposerProvider({
   className,
   maxExpandedTextChars,
+  maxUploadBytes,
   onSubmit,
   ...props
 }: InstanceWords<
@@ -77,11 +78,14 @@ function ChatComposerProvider({
     | 'pastedTextLabel'
     | 'missingAttachmentMessage'
     | 'expandedTextLimit'
+    | 'fileSizeLimit'
   >,
   'editorAriaLabel'
 > & {
   /** Refuses a send whose prompt, its pasted content expanded, is longer. */
   maxExpandedTextChars?: number;
+  /** Refuses a picked, pasted or dropped file of more bytes, such as discovery's `capabilities.uploads.maxBytes`. */
+  maxUploadBytes?: number;
 }) {
   const { hasSubmitted } = useAgentMeta();
   const t = useGenaiMessages();
@@ -117,6 +121,14 @@ function ChatComposerProvider({
             : {
                 maxChars: maxExpandedTextChars,
                 message: (counts) => t('composer.promptTooLong', counts),
+              }
+        }
+        fileSizeLimit={
+          maxUploadBytes === undefined
+            ? undefined
+            : {
+                maxBytes: maxUploadBytes,
+                message: (file) => t('composer.fileTooLarge', file),
               }
         }
         className={cn(

@@ -178,13 +178,14 @@ it('highlights a query chat as soon as it appears in Runs', async () => {
   }
 });
 
-it('only offers file attachments when the runtime advertises uploads, accepting what it lists', async () => {
+it('only offers file attachments when the runtime advertises uploads, accepting what it lists up to its size limit', async () => {
   const runtimeCapabilities = {
     chat: { href: api },
     history: { href: '/zukhruf/v1/history' },
   };
   const renderChat = (
-    uploads: { href: string; mediaTypes?: string[] } | undefined,
+    uploads:
+      { href: string; mediaTypes?: string[]; maxBytes: number } | undefined,
   ) => {
     const router = createMemoryRouter(
       [
@@ -216,7 +217,7 @@ it('only offers file attachments when the runtime advertises uploads, accepting 
     expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull();
     withoutUploads.unmount();
 
-    const withUploads = renderChat({ href: api });
+    const withUploads = renderChat({ href: api, maxBytes: 5_000_000 });
     expect(
       await screen.findByRole('button', { name: 'Attach files' }),
     ).toBeTruthy();
@@ -225,12 +226,25 @@ it('only offers file attachments when the runtime advertises uploads, accepting 
     ).toBe('image/*,video/*,audio/*');
     withUploads.unmount();
 
-    renderChat({ href: api, mediaTypes: ['image/png', 'video/mp4'] });
-    expect(
-      (await screen.findByLabelText('Attach media files')).getAttribute(
-        'accept',
-      ),
-    ).toBe('image/png,video/mp4');
+    renderChat({
+      href: api,
+      mediaTypes: ['image/png', 'video/mp4'],
+      maxBytes: 5_000_000,
+    });
+    const input = await screen.findByLabelText('Attach media files');
+    expect(input.getAttribute('accept')).toBe('image/png,video/mp4');
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File([new Uint8Array(5_000_001)], 'scan.png', {
+            type: 'image/png',
+          }),
+        ],
+      },
+    });
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Files over 5 MB cannot be attached: scan.png',
+    );
   } finally {
     cleanup();
   }

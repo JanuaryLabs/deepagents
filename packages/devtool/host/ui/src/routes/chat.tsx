@@ -11,6 +11,7 @@ import {
 } from 'react-router';
 import { z } from 'zod';
 
+import type { ChatDataTypes } from '@deepagents/context';
 import { ChildProgressList } from '@deepagents/devtool-history';
 import {
   AgentHeader,
@@ -93,7 +94,9 @@ export async function loader(args: LoaderFunctionArgs) {
       initialMessages:
         body.data.messages.length === 0
           ? []
-          : await validateUIMessages({ messages: body.data.messages }),
+          : await validateUIMessages<UIMessage<unknown, ChatDataTypes>>({
+              messages: body.data.messages,
+            }),
       sessionExists: true,
       sessionError: false,
     };
@@ -146,6 +149,7 @@ function ChatSessionBoundary({ chatId }: { chatId: string }) {
       sessionExists={sessionExists}
       supportsUploads={discovery.capabilities.uploads !== undefined}
       acceptedMediaTypes={discovery.capabilities.uploads?.mediaTypes}
+      maxUploadBytes={discovery.capabilities.uploads?.maxBytes}
     />
   );
 }
@@ -157,13 +161,15 @@ function ChatSession({
   sessionExists,
   supportsUploads,
   acceptedMediaTypes,
+  maxUploadBytes,
 }: {
   api: string;
   chatId: string;
-  initialMessages?: UIMessage[];
+  initialMessages?: UIMessage<unknown, ChatDataTypes>[];
   sessionExists: boolean;
   supportsUploads: boolean;
   acceptedMediaTypes?: readonly ComposerMediaType[];
+  maxUploadBytes?: number;
 }) {
   const navigate = useNavigate();
   const { revalidate } = useRevalidator();
@@ -201,6 +207,7 @@ function ChatSession({
         <ChatInput
           supportsUploads={supportsUploads}
           acceptedMediaTypes={acceptedMediaTypes}
+          maxUploadBytes={maxUploadBytes}
         />
       </ChatBot>
     </AgentProvider>
@@ -250,9 +257,11 @@ function ChatMessages() {
 function ChatInput({
   supportsUploads,
   acceptedMediaTypes,
+  maxUploadBytes,
 }: {
   supportsUploads: boolean;
   acceptedMediaTypes?: readonly ComposerMediaType[];
+  maxUploadBytes?: number;
 }) {
   const { submit } = useAgent();
   const { hasSubmitted } = useAgentMeta();
@@ -269,6 +278,7 @@ function ChatInput({
       <PendingToolInput className="bg-background">
         <ChatComposer.Provider
           acceptedMediaTypes={acceptedMediaTypes}
+          maxUploadBytes={maxUploadBytes}
           isTaskRunning={isRunning}
           onSubmit={(submission) => {
             if (!supportsUploads && submission.files.length > 0) {

@@ -14,6 +14,8 @@ export type GenaiMessageHelpers = {
   /** The form `Intl.PluralRules` picks for `count`, with `#` as the formatted count. */
   plural: (count: number, forms: PluralForms) => string;
   format: (value: number) => string;
+  /** `value` bytes in the largest decimal unit it fills (kB, MB, GB), cut, never rounded up, to one decimal. */
+  bytes: (value: number) => string;
 };
 
 type Message<Args> = (args: Args, helpers: GenaiMessageHelpers) => string;
@@ -84,6 +86,11 @@ export type GenaiMessages = {
   'composer.attachmentMissing': Message<{ label: string }>;
   /** The prompt, its pasted content expanded, has `chars` characters, over `maxChars`. */
   'composer.promptTooLong': Message<{ chars: number; maxChars: number }>;
+  /** A file larger than `maxBytes`, the upload limit; `name` is undefined for a file without one. */
+  'composer.fileTooLarge': Message<{
+    name: string | undefined;
+    maxBytes: number;
+  }>;
   'dictation.start': string;
   'dictation.starting': string;
   'dictation.stop': string;
@@ -216,6 +223,8 @@ export const en: GenaiMessages = {
     `Attached image is no longer available: ${label}`,
   'composer.promptTooLong': ({ chars, maxChars }, { plural }) =>
     `Prompt is too long after expanding pasted content (${plural(chars, { one: '# char', other: '# chars' })}; max ${plural(maxChars, { one: '# char', other: '# chars' })}).`,
+  'composer.fileTooLarge': ({ name, maxBytes }, { bytes }) =>
+    `Files over ${bytes(maxBytes)} cannot be attached: ${name ?? 'unnamed file'}`,
   'dictation.start': 'Start dictation',
   'dictation.starting': 'Starting dictation',
   'dictation.stop': 'Stop dictation',

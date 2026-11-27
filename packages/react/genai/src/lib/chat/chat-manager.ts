@@ -1,8 +1,9 @@
-import type { UIMessage, UseChatHelpers } from '@ai-sdk/react';
-import { SerialJobExecutor, type UIDataTypes, type UITools } from 'ai';
+import type { UseChatHelpers } from '@ai-sdk/react';
+import { SerialJobExecutor, type UIMessage } from 'ai';
 
 import { isRecord } from '@deepagents/context/browser';
 
+import type { AgentUIMessage } from './agent-ui-message.ts';
 import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
 import type { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
 
@@ -17,7 +18,7 @@ export interface ChatSubmission {
   files?: File[];
 }
 
-type BoundChat = UseChatHelpers<UIMessage<unknown, UIDataTypes, UITools>>;
+type BoundChat = UseChatHelpers<AgentUIMessage>;
 
 export interface ChatManagerOptions {
   chat: BoundChat;
@@ -134,7 +135,7 @@ export class ChatManager {
     this.chat.setMessages([]);
   }
 
-  setChat(messages: UIMessage[]): void {
+  setChat(messages: AgentUIMessage[]): void {
     this.chat.setMessages(messages);
   }
 
@@ -189,7 +190,7 @@ export class ChatManager {
     });
   }
 
-  getTriggeringUserMessage(toolCallId: string): UIMessage | null {
+  getTriggeringUserMessage(toolCallId: string): AgentUIMessage | null {
     const { messages } = this.chat;
     const idx = messages.findIndex(
       (msg) =>
@@ -209,7 +210,7 @@ export class ChatManager {
     return null;
   }
 
-  getLastAssistantMessage(): UIMessage | null {
+  getLastAssistantMessage(): AgentUIMessage | null {
     const { messages } = this.chat;
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === 'assistant') return messages[i];
