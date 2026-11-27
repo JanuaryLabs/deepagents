@@ -58,6 +58,14 @@ export type GenaiMessages = {
   'composer.noMatches': string;
   /** Marks a suggested command that takes arguments. */
   'composer.takesArgs': string;
+  /** A file that is not an image, video or audio file; `name` is undefined for a file without one. */
+  'composer.unsupportedFile': Message<{ name: string | undefined }>;
+  /** A sent prompt starts with a slash command nobody knows; `name` has no slash. */
+  'composer.unknownCommand': Message<{ name: string }>;
+  /** A sent prompt holds an attachment whose file is gone, such as one brought back by undo. */
+  'composer.attachmentMissing': Message<{ placeholder: string }>;
+  /** The prompt, its pasted content expanded, has `chars` characters, over `maxChars`. */
+  'composer.promptTooLong': Message<{ chars: number; maxChars: number }>;
   'dictation.start': string;
   'dictation.starting': string;
   'dictation.stop': string;
@@ -170,6 +178,15 @@ export const en: GenaiMessages = {
   'composer.suggestions': 'Suggestions',
   'composer.noMatches': 'no matches',
   'composer.takesArgs': 'args',
+  'composer.unsupportedFile': ({ name }) =>
+    name === undefined
+      ? 'Only image, video, or audio files can be attached: unnamed file'
+      : `Only image, video, or audio files can be attached: ${name}`,
+  'composer.unknownCommand': ({ name }) => `Unrecognized command: /${name}`,
+  'composer.attachmentMissing': ({ placeholder }) =>
+    `Attached image is no longer available: ${placeholder}`,
+  'composer.promptTooLong': ({ chars, maxChars }, { plural }) =>
+    `Prompt is too long after expanding pasted content (${plural(chars, { one: '# char', other: '# chars' })}; max ${plural(maxChars, { one: '# char', other: '# chars' })}).`,
   'dictation.start': 'Start dictation',
   'dictation.starting': 'Starting dictation',
   'dictation.stop': 'Stop dictation',

@@ -97,6 +97,24 @@ const ar: GenaiMessages = {
   'composer.suggestions': 'الاقتراحات',
   'composer.noMatches': 'لا نتائج',
   'composer.takesArgs': 'معاملات',
+  'composer.unsupportedFile': ({ name }) =>
+    name === undefined
+      ? 'يمكن إرفاق ملفات الصور والفيديو والصوت فقط، وهذا الملف بلا اسم'
+      : `يمكن إرفاق ملفات الصور والفيديو والصوت فقط: ${name}`,
+  'composer.unknownCommand': ({ name }) => `أمر غير معروف: /${name}`,
+  'composer.attachmentMissing': ({ placeholder }) =>
+    `الملف المرفق لم يعد متاحًا: ${placeholder}`,
+  'composer.promptTooLong': ({ chars, maxChars }, { plural }) => {
+    const forms = {
+      zero: 'لا أحرف',
+      one: 'حرف واحد',
+      two: 'حرفان',
+      few: '# أحرف',
+      many: '# حرفًا',
+      other: '# حرف',
+    };
+    return `الطلب أطول من الحد بعد توسيع المحتوى الملصق (${plural(chars, forms)}، والحد ${plural(maxChars, forms)}).`;
+  },
   'dictation.start': 'ابدأ الإملاء',
   'dictation.starting': 'يبدأ الإملاء',
   'dictation.stop': 'أوقف الإملاء',
@@ -605,6 +623,171 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
     });
   });
 
+  it('translates why the composer refused a file, with its name and without one, and an unknown command', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup({ applyAccept: false });
+    render(
+      inArabic(
+        <ChatComposer.Provider onSubmit={() => Promise.resolve()}>
+          <Composer.Trigger trigger="/">
+            <Composer.Command
+              id="cmd-review"
+              value="review"
+              label="Review"
+              detail="Review the change"
+            />
+          </Composer.Trigger>
+          <ChatComposer.Root>
+            <ChatComposer.Content>
+              <ChatComposer.Editor />
+              <ChatComposer.Error />
+            </ChatComposer.Content>
+            <ChatComposer.Toolbar>
+              <ChatComposer.AttachFiles />
+            </ChatComposer.Toolbar>
+          </ChatComposer.Root>
+        </ChatComposer.Provider>,
+      ),
+      { wrapper: Harness },
+    );
+    const prompt = await screen.findByRole('textbox', {
+      name: ar['composer.editor'],
+    });
+    const input = screen.getByLabelText(ar['composer.attachInput']);
+
+    await user.upload(
+      input,
+      new File(['a,b'], 'report.csv', { type: 'text/csv' }),
+    );
+    const named = (await screen.findByRole('alert')).textContent;
+    await user.upload(input, new File(['a,b'], '', { type: 'text/csv' }));
+    const unnamed = screen.getByRole('alert').textContent;
+    await user.click(prompt);
+    await user.keyboard('/nope now{Enter}');
+
+    expect({
+      named,
+      unnamed,
+      command: screen.getByRole('alert').textContent,
+    }).toEqual({
+      named: 'يمكن إرفاق ملفات الصور والفيديو والصوت فقط: report.csv',
+      unnamed: 'يمكن إرفاق ملفات الصور والفيديو والصوت فقط، وهذا الملف بلا اسم',
+      command: 'أمر غير معروف: /nope',
+    });
+  });
+
+  it('translates why the composer refused an attachment brought back by undo, and draws an X in its remove button', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(
+      inArabic(
+        <ChatComposer.Provider onSubmit={() => Promise.resolve()}>
+          <ChatComposer.Root>
+            <ChatComposer.Content>
+              <ChatComposer.Attachments />
+              <ChatComposer.Editor />
+              <ChatComposer.Error />
+            </ChatComposer.Content>
+            <ChatComposer.Toolbar>
+              <ChatComposer.AttachFiles />
+            </ChatComposer.Toolbar>
+          </ChatComposer.Root>
+        </ChatComposer.Provider>,
+      ),
+      { wrapper: Harness },
+    );
+    const prompt = await screen.findByRole('textbox', {
+      name: ar['composer.editor'],
+    });
+
+    await user.upload(
+      screen.getByLabelText(ar['composer.attachInput']),
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+    );
+    const remove = await screen.findByRole('button', {
+      name: 'أزل [Image #1]',
+    });
+    const icons = Array.from(remove.querySelectorAll('svg'), (icon) =>
+      icon.getAttribute('class'),
+    );
+    // ProseMirror groups edits less than 500 ms apart into one undo step.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await user.click(remove);
+    await user.click(prompt);
+    await user.keyboard('{Control>}z{/Control}{Enter}');
+
+    expect({
+      icons,
+      failure: (await screen.findByRole('alert')).textContent,
+    }).toEqual({
+      icons: ['lucide lucide-x size-3'],
+      failure: 'الملف المرفق لم يعد متاحًا: [Image #1]',
+    });
+  });
+
+  it('translates why the composer refused an over-long prompt, with Arabic plural forms of both counts', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    function Counts() {
+      const t = useGenaiMessages();
+      return [
+        { chars: 2, maxChars: 1 },
+        { chars: 11, maxChars: 3 },
+        { chars: 100, maxChars: 2 },
+      ].map((counts) => (
+        <li key={counts.chars}>{t('composer.promptTooLong', counts)}</li>
+      ));
+    }
+    const user = userEvent.setup();
+    render(
+      inArabic(
+        <>
+          <ChatComposer.Provider
+            maxExpandedTextChars={5}
+            onSubmit={() => Promise.resolve()}
+          >
+            <ChatComposer.Root>
+              <ChatComposer.Content>
+                <ChatComposer.Editor />
+                <ChatComposer.Error />
+              </ChatComposer.Content>
+            </ChatComposer.Root>
+          </ChatComposer.Provider>
+          <ul aria-label="plurals">
+            <Counts />
+          </ul>
+        </>,
+      ),
+      { wrapper: Harness },
+    );
+    const prompt = await screen.findByRole('textbox', {
+      name: ar['composer.editor'],
+    });
+
+    await user.click(prompt);
+    await user.keyboard('hello world{Enter}');
+
+    expect({
+      failure: (await screen.findByRole('alert')).textContent,
+      plurals: within(screen.getByRole('list', { name: 'plurals' }))
+        .getAllByRole('listitem')
+        .map((line) => line.textContent),
+    }).toEqual({
+      failure:
+        'الطلب أطول من الحد بعد توسيع المحتوى الملصق (11 حرفًا، والحد 5 أحرف).',
+      plurals: [
+        'الطلب أطول من الحد بعد توسيع المحتوى الملصق (حرفان، والحد حرف واحد).',
+        'الطلب أطول من الحد بعد توسيع المحتوى الملصق (11 حرفًا، والحد 3 أحرف).',
+        'الطلب أطول من الحد بعد توسيع المحتوى الملصق (100 حرف، والحد حرفان).',
+      ],
+    });
+  });
+
   it('translates the greeting, the attachments, the reminders, the usage, the approval and the retry in static mode', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
@@ -1036,6 +1219,11 @@ describe('without a GenaiMessagesProvider, beyond the step lines', () => {
         t('dictation.transcribing'),
         t('snapshot.copy'),
         t('composer.removeAttachment', { placeholder: '[Image #1]' }),
+        t('composer.unsupportedFile', { name: 'report.csv' }),
+        t('composer.unsupportedFile', { name: undefined }),
+        t('composer.unknownCommand', { name: 'nope' }),
+        t('composer.attachmentMissing', { placeholder: '[Image #1]' }),
+        t('composer.promptTooLong', { chars: 25, maxChars: 12 }),
       ].map((line) => <p key={line}>{line}</p>);
     }
     render(<Lines />);
@@ -1055,6 +1243,11 @@ describe('without a GenaiMessagesProvider, beyond the step lines', () => {
       'Transcribing…',
       'Copy snapshot',
       'Remove [Image #1]',
+      'Only image, video, or audio files can be attached: report.csv',
+      'Only image, video, or audio files can be attached: unnamed file',
+      'Unrecognized command: /nope',
+      'Attached image is no longer available: [Image #1]',
+      'Prompt is too long after expanding pasted content (25 chars; max 12 chars).',
     ]);
   });
 });

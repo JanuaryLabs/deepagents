@@ -111,20 +111,6 @@ export function prepareComposerPayload(
 
 export type ComposerPreparedPayload = ReturnType<typeof prepareComposerPayload>;
 
-export function expandedTextLimitError(
-  prepared: NonNullable<ComposerPreparedPayload>,
-  maxExpandedTextChars?: number,
-) {
-  if (!maxExpandedTextChars || maxExpandedTextChars < 1) {
-    return null;
-  }
-  const expandedChars = characterCount(prepared.prompt);
-  if (expandedChars <= maxExpandedTextChars) {
-    return null;
-  }
-  return `Prompt is too long after expanding pasted content (${expandedChars} chars; max ${maxExpandedTextChars} chars).`;
-}
-
 function syncTextElements(
   state: ComposerState,
   slashCommands: ComposerItemEntry[],

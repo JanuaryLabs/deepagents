@@ -33,6 +33,8 @@ import {
   attachFilesWords,
   attachmentsWords,
   editorWords,
+  expandedTextLimitMessage,
+  footerWords,
   popupWords,
   rootWords,
   shortcutsWords,
@@ -299,7 +301,14 @@ function RichInputScenario({
         draftKey={draftKey}
         disabled={disabled}
         isTaskRunning={running}
-        maxExpandedTextChars={maxExpandedTextChars}
+        expandedTextLimit={
+          maxExpandedTextChars === undefined
+            ? undefined
+            : {
+                maxChars: maxExpandedTextChars,
+                message: expandedTextLimitMessage,
+              }
+        }
         onStateChange={(state, prepared) => setSnapshot({ state, prepared })}
         onSubmit={(submission) => {
           setSubmissions((current) => [submission, ...current]);
@@ -340,7 +349,7 @@ function RichInputScenario({
           <Composer.Error />
         </Composer.Content>
         <Composer.Shortcuts {...shortcutsWords} />
-        <Composer.Footer />
+        <Composer.Footer {...footerWords} />
       </Composer.Root>
       <button type="button" onClick={() => setRunning((current) => !current)}>
         Toggle running
@@ -812,19 +821,42 @@ describe('Composer words from the host', () => {
     suggestions: 'Propositions',
     noMatches: 'Aucun résultat',
     takesArgs: 'arguments',
+    unsupportedFile: ({ name }: { name: string | undefined }) =>
+      name === undefined
+        ? 'Seuls les médias se joignent : fichier sans nom'
+        : `Seuls les médias se joignent : ${name}`,
+    unknownCommand: ({ name }: { name: string }) =>
+      `Commande inconnue : /${name}`,
+    missingAttachment: ({ placeholder }: { placeholder: string }) =>
+      `Pièce jointe perdue : ${placeholder}`,
+    tooLong: ({ chars, maxChars }: { chars: number; maxChars: number }) =>
+      `Trop long : ${chars} sur ${maxChars} caractères`,
   };
 
   function WordsScenario({
     onSubmit,
+    maxChars,
+    isTaskRunning,
     children,
   }: {
     onSubmit?: () => Promise<unknown>;
+    maxChars?: number;
+    isTaskRunning?: boolean;
     children?: ReactNode;
   }) {
     return (
       <Composer.Root
         editorAriaLabel={words.editorAriaLabel}
         submitFailedMessage={words.submitFailedMessage}
+        unsupportedFileMessage={words.unsupportedFile}
+        unknownCommandMessage={words.unknownCommand}
+        missingAttachmentMessage={words.missingAttachment}
+        expandedTextLimit={
+          maxChars === undefined
+            ? undefined
+            : { maxChars, message: words.tooLong }
+        }
+        isTaskRunning={isTaskRunning}
         onSubmit={onSubmit}
       >
         {registryTriggers()}
@@ -842,6 +874,7 @@ describe('Composer words from the host', () => {
           <Composer.Attachments
             aria-label={words.attachments}
             removeLabel={words.removeAttachment}
+            removeIcon={<svg aria-hidden data-icon="host-remove" />}
           />
           <Composer.Editor placeholder={words.placeholder} />
           <Composer.Error />
@@ -928,6 +961,213 @@ describe('Composer words from the host', () => {
     expect((await screen.findByRole('alert')).textContent).toBe(
       words.submitFailedMessage,
     );
+  });
+
+  it('draws the host icon in each remove button', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(<WordsScenario />, { wrapper: FakeClock });
+
+    await user.upload(
+      await screen.findByLabelText(words.attachInput),
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+    );
+    const remove = await screen.findByRole('button', {
+      name: 'Retirer [Image #1]',
+    });
+
+    expect(
+      Array.from(remove.querySelectorAll('svg'), (icon) =>
+        icon.getAttribute('data-icon'),
+      ),
+    ).toEqual(['host-remove']);
+  });
+
+  it('says in the host words why a file was refused, with its name and without one', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup({ applyAccept: false });
+    render(<WordsScenario />, { wrapper: FakeClock });
+    const input = await screen.findByLabelText(words.attachInput);
+
+    await user.upload(
+      input,
+      new File(['a,b'], 'report.csv', { type: 'text/csv' }),
+    );
+    const named = (await screen.findByRole('alert')).textContent;
+    await user.upload(input, new File(['a,b'], '', { type: 'text/csv' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).not.toBe(named),
+    );
+
+    expect({
+      named,
+      unnamed: screen.getByRole('alert').textContent,
+    }).toEqual({
+      named: words.unsupportedFile({ name: 'report.csv' }),
+      unnamed: words.unsupportedFile({ name: undefined }),
+    });
+  });
+
+  it('says in the host words that a sent command is unknown', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(<WordsScenario onSubmit={() => Promise.resolve()} />, {
+      wrapper: FakeClock,
+    });
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    await user.click(prompt);
+    await user.keyboard('/nope now{Enter}');
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      words.unknownCommand({ name: 'nope' }),
+    );
+  });
+
+  it('says in the host words that an attachment brought back by undo has no file', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(<WordsScenario onSubmit={() => Promise.resolve()} />, {
+      wrapper: FakeClock,
+    });
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    await user.upload(
+      screen.getByLabelText(words.attachInput),
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+    );
+    // ProseMirror groups edits less than 500 ms apart into one undo step.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await user.click(
+      await screen.findByRole('button', { name: 'Retirer [Image #1]' }),
+    );
+    await user.click(prompt);
+    await user.keyboard('{Control>}z{/Control}{Enter}');
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      words.missingAttachment({ placeholder: '[Image #1]' }),
+    );
+  });
+
+  it('says in the host words how long a prompt is over its limit', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(<WordsScenario maxChars={5} onSubmit={() => Promise.resolve()} />, {
+      wrapper: FakeClock,
+    });
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    await user.click(prompt);
+    await user.keyboard('hello world{Enter}');
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      words.tooLong({ chars: 11, maxChars: 5 }),
+    );
+  });
+
+  it('draws the footer hints in the host words while drafting, queueing, picking a suggestion and searching history', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const footer = (
+      <Composer.Footer
+        data-testid="footer"
+        draftHints={{
+          send: 'envoyer',
+          queue: 'mettre en file',
+          newline: 'nouvelle ligne',
+          history: 'historique',
+          lineEnd: 'fin de ligne',
+          killToEnd: 'couper',
+          killToStart: 'couper avant',
+          killWord: 'couper le mot',
+          wordMove: 'mot suivant',
+          yank: 'coller',
+        }}
+        popupHints={{ insert: 'insérer', dismiss: 'fermer' }}
+        reverseSearchHints={{
+          label: 'recherche inverse :',
+          previous: 'précédent',
+          next: 'suivant',
+          accept: 'accepter',
+          cancel: 'annuler',
+        }}
+      />
+    );
+    const user = userEvent.setup();
+    const view = render(
+      <WordsScenario onSubmit={() => Promise.resolve()}>
+        {footer}
+      </WordsScenario>,
+      { wrapper: FakeClock },
+    );
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+    const hints = () =>
+      Array.from(
+        screen.getByTestId('footer').children,
+        (hint) => hint.textContent,
+      );
+
+    const drafting = hints();
+    view.rerender(
+      <WordsScenario onSubmit={() => Promise.resolve()} isTaskRunning>
+        {footer}
+      </WordsScenario>,
+    );
+    const queueing = hints()[0];
+    await user.click(prompt);
+    await user.keyboard('/rev');
+    await screen.findByRole('listbox', { name: words.suggestions });
+    const picking = hints();
+    await user.keyboard('{Escape}{Control>}a{/Control}{Backspace}');
+    await user.keyboard('first{Enter}');
+    fireEditorKeyDown(prompt, { key: 'r', code: 'KeyR', ctrlKey: true });
+    const searching = hints();
+
+    expect({ drafting, queueing, picking, searching }).toEqual({
+      drafting: [
+        'Enterenvoyer',
+        'Shift Enternouvelle ligne',
+        'Alt Enternouvelle ligne',
+        'Ctrl J/Mnouvelle ligne',
+        'Ctrl P/Nhistorique',
+        'Ctrl Efin de ligne',
+        'Ctrl Kcouper',
+        'Ctrl Ucouper avant',
+        'Ctrl Wcouper le mot',
+        'Alt B/Fmot suivant',
+        'Ctrl Ycoller',
+      ],
+      queueing: 'Entermettre en file',
+      picking: ['Enterinsérer', 'Tabinsérer', 'Escfermer'],
+      searching: [
+        'Ctrl R',
+        'recherche inverse :',
+        '_',
+        'Ctrl R précédent',
+        'Ctrl S suivant',
+        'Enter accepter',
+        'Esc annuler',
+      ],
+    });
   });
 
   it('draws the keyboard shortcuts sheet in the host words', async () => {

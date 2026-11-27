@@ -32,7 +32,6 @@ import {
   createComposerDraftSource,
   createDraftFromSource,
   createDraftFromState,
-  expandedTextLimitError,
   findHistorySearchMatch,
   isComposerDraftEmpty,
   prepareComposerPayload,
@@ -110,10 +109,20 @@ export type ComposerRootProps = {
   isTaskRunning?: boolean;
   queueSubmissions?: boolean;
   hasInteracted?: boolean;
-  maxExpandedTextChars?: number;
+  /** Refuses a send whose prompt, its pasted content expanded, is longer than `maxChars`. */
+  expandedTextLimit?: {
+    maxChars: number;
+    message: (counts: { chars: number; maxChars: number }) => string;
+  };
   editorAriaLabel: string;
   /** Shown when `onSubmit` rejects with something other than an `Error`. */
   submitFailedMessage: string;
+  /** Shown when a file that is not an image, video or audio file is attached; `name` is undefined for a file without one. */
+  unsupportedFileMessage: (file: { name: string | undefined }) => string;
+  /** Shown when a sent prompt starts with a slash command that no trigger knows. */
+  unknownCommandMessage: (command: { name: string }) => string;
+  /** Shown when a sent prompt holds an attachment whose file is gone, such as one brought back by undo after its removal. */
+  missingAttachmentMessage: (attachment: { placeholder: string }) => string;
   className?: string;
   children?: ReactNode;
   dictation?: ComposerDictation;
@@ -172,7 +181,29 @@ export type ComposerShortcutsProps = ComponentPropsWithoutRef<'div'> & {
   descriptions: Record<ComposerShortcutAction, string>;
 };
 
-export type ComposerFooterProps = ComponentPropsWithoutRef<'div'>;
+export type ComposerFooterProps = ComponentPropsWithoutRef<'div'> & {
+  /** The hints while the prompt is being written. */
+  draftHints: Record<
+    | 'send'
+    | 'queue'
+    | 'newline'
+    | 'history'
+    | 'lineEnd'
+    | 'killToEnd'
+    | 'killToStart'
+    | 'killWord'
+    | 'wordMove'
+    | 'yank',
+    string
+  >;
+  /** The hints while a suggestion popup is open. */
+  popupHints: Record<'insert' | 'dismiss', string>;
+  /** The hints while a reverse history search is open; `label` leads its query. */
+  reverseSearchHints: Record<
+    'label' | 'previous' | 'next' | 'accept' | 'cancel',
+    string
+  >;
+};
 
 type ComposerActionTriggerProps = Button.Props;
 
@@ -230,9 +261,12 @@ function ComposerRootInner({
   isTaskRunning = false,
   queueSubmissions = false,
   hasInteracted = false,
-  maxExpandedTextChars,
+  expandedTextLimit,
   editorAriaLabel,
   submitFailedMessage,
+  unsupportedFileMessage,
+  unknownCommandMessage,
+  missingAttachmentMessage,
   className,
   children,
   dictation,
@@ -745,7 +779,7 @@ function ComposerRootInner({
     if (attachmentMediaOf(file) === null) {
       setComposer((state) => ({
         ...state,
-        error: `Only image, video, or audio files can be attached: ${file.name || 'unnamed file'}`,
+        error: unsupportedFileMessage({ name: file.name || undefined }),
         shortcutsOpen: false,
       }));
       setActivePopup(null);
@@ -1113,7 +1147,7 @@ function ComposerRootInner({
     if (unknownSlash) {
       setComposer((state) => ({
         ...state,
-        error: `Unrecognized command: /${unknownSlash}`,
+        error: unknownCommandMessage({ name: unknownSlash }),
         shortcutsOpen: false,
       }));
       setActivePopup(null);
@@ -1139,11 +1173,14 @@ function ComposerRootInner({
         payloadElements: [],
         mentionBindings: [],
       } satisfies NonNullable<ComposerPreparedPayload>);
-    const lengthError = expandedTextLimitError(prepared, maxExpandedTextChars);
-    if (lengthError) {
+    const chars = characterCount(prepared.prompt);
+    if (expandedTextLimit && chars > expandedTextLimit.maxChars) {
       setComposer((state) => ({
         ...state,
-        error: lengthError,
+        error: expandedTextLimit.message({
+          chars,
+          maxChars: expandedTextLimit.maxChars,
+        }),
         shortcutsOpen: false,
       }));
       setActivePopup(null);
@@ -1156,7 +1193,7 @@ function ComposerRootInner({
       if (!file) {
         setComposer((state) => ({
           ...state,
-          error: `Attached image is no longer available: ${image.placeholder}`,
+          error: missingAttachmentMessage({ placeholder: image.placeholder }),
           shortcutsOpen: false,
         }));
         setActivePopup(null);
@@ -2143,7 +2180,13 @@ function ComposerShortcuts({
   );
 }
 
-function ComposerFooter({ className, ...props }: ComposerFooterProps) {
+function ComposerFooter({
+  className,
+  draftHints,
+  popupHints,
+  reverseSearchHints,
+  ...props
+}: ComposerFooterProps) {
   const { activePopup, state } = useComposerContext('Composer.Footer');
   if (state.reverseSearch !== null) {
     return (
@@ -2157,37 +2200,39 @@ function ComposerFooter({ className, ...props }: ComposerFooterProps) {
         <kbd className="border-border bg-muted text-foreground rounded border px-1.5 py-0.5 font-[inherit]">
           Ctrl R
         </kbd>
-        <span>reverse-i-search:</span>
+        <span>{reverseSearchHints.label}</span>
         <span className="text-foreground">{state.reverseSearch || '_'}</span>
-        <span>Ctrl R previous</span>
-        <span>Ctrl S next</span>
-        <span>Enter accept</span>
-        <span>Esc cancel</span>
+        <span>Ctrl R {reverseSearchHints.previous}</span>
+        <span>Ctrl S {reverseSearchHints.next}</span>
+        <span>Enter {reverseSearchHints.accept}</span>
+        <span>Esc {reverseSearchHints.cancel}</span>
       </div>
     );
   }
 
   const hints = activePopup
     ? [
-        ['Enter', 'insert'],
-        ['Tab', 'insert'],
-        ['Esc', 'dismiss'],
+        ['Enter', popupHints.insert],
+        ['Tab', popupHints.insert],
+        ['Esc', popupHints.dismiss],
       ]
     : [
         [
           'Enter',
-          state.isTaskRunning || state.queueSubmissions ? 'queue' : 'send',
+          state.isTaskRunning || state.queueSubmissions
+            ? draftHints.queue
+            : draftHints.send,
         ],
-        ['Shift Enter', 'newline'],
-        ['Alt Enter', 'newline'],
-        ['Ctrl J/M', 'newline'],
-        ['Ctrl P/N', 'history'],
-        ['Ctrl E', 'line end'],
-        ['Ctrl K', 'kill'],
-        ['Ctrl U', 'kill back'],
-        ['Ctrl W', 'word kill'],
-        ['Alt B/F', 'word move'],
-        ['Ctrl Y', 'yank'],
+        ['Shift Enter', draftHints.newline],
+        ['Alt Enter', draftHints.newline],
+        ['Ctrl J/M', draftHints.newline],
+        ['Ctrl P/N', draftHints.history],
+        ['Ctrl E', draftHints.lineEnd],
+        ['Ctrl K', draftHints.killToEnd],
+        ['Ctrl U', draftHints.killToStart],
+        ['Ctrl W', draftHints.killWord],
+        ['Alt B/F', draftHints.wordMove],
+        ['Ctrl Y', draftHints.yank],
       ];
 
   return (

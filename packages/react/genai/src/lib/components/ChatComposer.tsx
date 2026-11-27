@@ -34,11 +34,22 @@ type InstanceWords<Props, Words extends keyof Props> = Omit<Props, Words> &
 
 function ChatComposerProvider({
   className,
+  maxExpandedTextChars,
   ...props
 }: InstanceWords<
-  Omit<ComposerRootProps, 'submitFailedMessage'>,
+  Omit<
+    ComposerRootProps,
+    | 'submitFailedMessage'
+    | 'unsupportedFileMessage'
+    | 'unknownCommandMessage'
+    | 'missingAttachmentMessage'
+    | 'expandedTextLimit'
+  >,
   'editorAriaLabel'
->) {
+> & {
+  /** Refuses a send whose prompt, its pasted content expanded, is longer. */
+  maxExpandedTextChars?: number;
+}) {
   const { hasSubmitted } = useAgentMeta();
   const t = useGenaiMessages();
   return (
@@ -46,6 +57,19 @@ function ChatComposerProvider({
       hasInteracted={hasSubmitted}
       editorAriaLabel={t('composer.editor')}
       submitFailedMessage={t('composer.sendFailed')}
+      unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
+      unknownCommandMessage={(command) => t('composer.unknownCommand', command)}
+      missingAttachmentMessage={(attachment) =>
+        t('composer.attachmentMissing', attachment)
+      }
+      expandedTextLimit={
+        maxExpandedTextChars === undefined
+          ? undefined
+          : {
+              maxChars: maxExpandedTextChars,
+              message: (counts) => t('composer.promptTooLong', counts),
+            }
+      }
       className={cn(
         'bg-background sticky bottom-0 rounded-t-2xl border-0 **:data-[slot=composer-editor]:!min-h-15',
         className,
@@ -96,7 +120,10 @@ function ChatComposerEditor({
 function ChatComposerAttachments({
   className,
   ...props
-}: InstanceWords<Omit<ComposerAttachmentsProps, 'removeLabel'>, 'aria-label'>) {
+}: InstanceWords<
+  Omit<ComposerAttachmentsProps, 'removeLabel' | 'removeIcon'>,
+  'aria-label'
+>) {
   const t = useGenaiMessages();
   return (
     <Composer.Attachments
@@ -104,6 +131,7 @@ function ChatComposerAttachments({
       removeLabel={(placeholder) =>
         t('composer.removeAttachment', { placeholder })
       }
+      removeIcon={<XIcon aria-hidden className="size-3" />}
       className={cn('pb-1.5', className)}
       {...props}
     />

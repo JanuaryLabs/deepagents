@@ -1,7 +1,11 @@
 import { Button } from '@base-ui/react/button';
 import { cn } from 'cn';
-import { X } from 'lucide-react';
-import { type ComponentPropsWithoutRef, useEffect, useState } from 'react';
+import {
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useEffect,
+  useState,
+} from 'react';
 
 import { useComposerContext } from './ComposerContext.ts';
 import type { ComposerState } from './ComposerTypes.ts';
@@ -10,6 +14,8 @@ export type ComposerAttachmentsProps = ComponentPropsWithoutRef<'div'> & {
   'aria-label': string;
   /** Names the button that removes the attachment shown as `placeholder`. */
   removeLabel: (placeholder: string) => string;
+  /** Drawn inside each remove button. */
+  removeIcon: ReactNode;
 };
 
 type AttachmentPreviewProps = {
@@ -20,6 +26,7 @@ type AttachmentPreviewProps = {
 export function ComposerAttachments({
   className,
   removeLabel,
+  removeIcon,
   ...props
 }: ComposerAttachmentsProps) {
   const { state, attachedImages } = useComposerContext('Composer.Attachments');
@@ -40,6 +47,7 @@ export function ComposerAttachments({
           key={attachment.id}
           attachment={attachment}
           removeLabel={removeLabel}
+          removeIcon={removeIcon}
         />
       ))}
     </div>
@@ -49,10 +57,10 @@ export function ComposerAttachments({
 function ComposerAttachment({
   attachment: { id, placeholder, media },
   removeLabel,
+  removeIcon,
 }: {
   attachment: ComposerState['imageAttachments'][number];
-  removeLabel: ComposerAttachmentsProps['removeLabel'];
-}) {
+} & Pick<ComposerAttachmentsProps, 'removeLabel' | 'removeIcon'>) {
   const { attachedImages, disabled, actions } = useComposerContext(
     'Composer.Attachments',
   );
@@ -80,7 +88,7 @@ function ComposerAttachment({
         onClick={() => actions.removeImageAttachment(id)}
         className="bg-background text-foreground border-border hover:bg-muted absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border disabled:opacity-50"
       >
-        <X aria-hidden className="size-3" />
+        {removeIcon}
       </Button>
     </div>
   );

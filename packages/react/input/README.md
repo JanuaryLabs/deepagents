@@ -67,7 +67,7 @@ The host and this package must use the same copy of `@zukhruf/ui`. Each copy has
 
 ## Words
 
-The parts ship no words ([ADR 0007](./docs/dictation/adr/0007-react-input-ships-no-words-or-icons-and-react-genai-ships-chatcomposer-dictate.md)). Each part that shows or announces text takes it as a required prop: `Composer.Root`'s `editorAriaLabel` and `submitFailedMessage`, `Composer.Editor`'s `placeholder`, `Composer.Attachments`' `aria-label` and `removeLabel`, `Composer.Popup`'s `listboxLabel`, `noMatchesLabel` and `argsLabel`, `Composer.AttachFiles`' `inputLabel`, and `Composer.Shortcuts`' `heading`, `closeLabel`, `groupTitles` and `descriptions`. `ChatComposer` of `@deepagents/react-genai` fills them from its message catalog.
+The parts ship no words ([ADR 0007](./docs/dictation/adr/0007-react-input-ships-no-words-or-icons-and-react-genai-ships-chatcomposer-dictate.md)). Each part that shows or announces text takes it as a required prop: `Composer.Root`'s `editorAriaLabel`, `submitFailedMessage`, `unsupportedFileMessage`, `unknownCommandMessage` and `missingAttachmentMessage` (and `expandedTextLimit`'s `message`, beside its `maxChars`), `Composer.Editor`'s `placeholder`, `Composer.Attachments`' `aria-label`, `removeLabel` and `removeIcon`, `Composer.Popup`'s `listboxLabel`, `noMatchesLabel` and `argsLabel`, `Composer.AttachFiles`' `inputLabel`, `Composer.Shortcuts`' `heading`, `closeLabel`, `groupTitles` and `descriptions`, and `Composer.Footer`'s `draftHints`, `popupHints` and `reverseSearchHints`. `ChatComposer` of `@deepagents/react-genai` fills the ones it renders from its message catalog; it renders no `Composer.Shortcuts` or `Composer.Footer`, so a host that uses those passes their words itself.
 
 ## Features
 
