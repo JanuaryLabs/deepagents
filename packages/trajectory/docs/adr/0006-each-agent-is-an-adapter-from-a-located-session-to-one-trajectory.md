@@ -1,0 +1,26 @@
+# Each agent is an Adapter from a located session to one trajectory
+
+Status: proposed, for review (deepagents #6107). The need for adapters of our own was ruled by Ezz on 2026-11-27: not every agent needs support, but we must be able to write adapters.
+
+## Context
+
+The leaders split finding sessions from reading them:
+
+- franken: `detect` / `scan` on the `Connector` trait;
+- letta: `listTrajectories` / `normalizeTranscript`;
+- meticulous: `findTraceSessions` / `convert*Session`;
+- the Claude Agent SDK: `listSessions` / `getSessionMessages`.
+
+Each agent locates a session differently. Claude has one transcript plus a subagent folder. Codex has several rollout files of one thread, some of them zstd.
+
+## Decision
+
+- `Adapter<Session>` has `agent` (ATIF `agent.name`) and `read(session, options) → ReadResult`.
+- Each agent has its own `Session` type, `ClaudeCodeSession` or `CodexThread`, so an adapter cannot be handed another agent's session.
+- Stores are per agent too.
+- No registry and no "detect every agent". A host composes the stores it needs.
+
+## Consequences
+
+- A Goose, Crush or VS Code adapter is a class of the host's or a later member of this package. No change to the port is needed.
+- The package has no global list of agents to keep in sync.
