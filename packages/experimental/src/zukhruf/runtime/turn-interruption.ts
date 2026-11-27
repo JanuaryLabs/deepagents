@@ -13,6 +13,7 @@ import type { ConversationId } from '../mailbox/types.ts';
 import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
 import type { AdmissionScope, AgentStorage } from '../storage/agent-storage.ts';
 import type { ApprovalController } from './approval-controller.ts';
+import { withChildActivity } from './conversation-status/projector.ts';
 import { turnAbortedMessage } from './turn-aborted.ts';
 import type { TurnSettlement } from './turn-settlement.ts';
 import { type UserQuestion, isUserQuestion } from './user-question.ts';
@@ -200,7 +201,8 @@ export class TurnInterruption {
    * In one admission: a queued stream moves to cancelled, and when `lone`
    * is its question, the question and the marker are written with it, so
    * every reader sees all three or none. A worker's claim is a CAS on the
-   * same row, so only one of them records the input.
+   * same row, so only one of them records the input. A child's completion
+   * receipt commits with the cancel, since no worker will run the turn.
    */
   async #admit(
     conversation: ConversationId,
@@ -224,6 +226,21 @@ export class TurnInterruption {
             : undefined,
       );
       if (!updated) return heldOrDone(stream.status);
+      if (thread && !thread.path.isRoot) {
+        const path = thread.path.toString();
+        await scope.store.updateChat(conversation.chatId, (chat) => {
+          const metadata = withChildActivity(chat.metadata, {
+            id: `completion:${turnId}`,
+            type: 'completion',
+            outcome: 'cancelled',
+            at: now,
+            actorPath: path,
+            targetPath: path,
+            streamId: turnId,
+          });
+          return metadata && { metadata };
+        });
+      }
       if (!lone) return 'dropped';
       await recordQuestion(
         scope,

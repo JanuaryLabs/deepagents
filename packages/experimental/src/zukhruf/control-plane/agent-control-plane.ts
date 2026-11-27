@@ -392,18 +392,16 @@ export class AgentControlPlane {
     );
     const currentTurn = await this.#queue.getCurrentTurn(target.conversation);
     if (currentTurn) {
-      const interruptedThread =
-        (await this.#directory.recordLatestTurnIfCurrent(
-          target.conversation,
-          currentTurn.streamId,
-          target.lastTurnId,
-        )) ?? target;
+      await this.#directory.recordLatestTurnIfCurrent(
+        target.conversation,
+        currentTurn.streamId,
+        target.lastTurnId,
+      );
       // Codex's interrupt_agent aborts through the same interrupt_task as a
-      // user's interrupt, so a task that has not started is recorded.
+      // user's interrupt, so a task that has not started is recorded. A queued
+      // turn's completion receipt commits with its cancel; a running one's
+      // worker records it on exit.
       await this.#interruption.interruptHead(target.conversation, currentTurn);
-      // An interrupted child sends its parent no FINAL_ANSWER, as in Codex;
-      // this records only its completion receipt.
-      await this.projectTerminal(currentTurn, interruptedThread);
       await this.#recordActivity(target, {
         id: `interrupt:${currentTurn.streamId}`,
         type: 'interrupt',
