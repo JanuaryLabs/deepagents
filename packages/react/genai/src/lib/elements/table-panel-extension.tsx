@@ -159,8 +159,9 @@ function directiveAttribute(
   return value || undefined;
 }
 
-function tableDirectiveTextDirection(markdown: string) {
-  const tree = tableDirectiveParser.parse(markdown);
+// Gives each table directive its title and description as text, and says
+// whether the tree holds one.
+function writeTableDirectiveText(tree: Root) {
   let hasTableDirective = false;
 
   visit(tree, 'leafDirective', (directive, index, parent) => {
@@ -177,21 +178,40 @@ function tableDirectiveTextDirection(markdown: string) {
     directive.children = metadata ? [{ type: 'text', value: metadata }] : [];
   });
 
-  if (!hasTableDirective) return undefined;
-  return detectTextDirection(toString(tree, { includeHtml: false }));
+  return hasTableDirective;
+}
+
+// The direction of the words a reader sees. Code renders left to right in any
+// block, so it is no evidence, as in streamdown's own detection. Inline HTML (a
+// citation, an element inside a sentence) is a tag with no words of its own; a
+// block of HTML keeps its source, as streamdown reads it.
+function textDirection(tree: Root) {
+  visit(tree, ['code', 'inlineCode'] as const, (code) => {
+    code.value = '';
+  });
+  visit(tree, ['paragraph', 'heading', 'tableCell'], (phrasing) => {
+    visit(phrasing, 'html', (tag) => {
+      tag.value = '';
+    });
+  });
+  return detectTextDirection(toString(tree));
 }
 
 function DefaultStreamdownBlock(props: BlockProps) {
   return <Block {...props} />;
 }
 
+// Streamdown's streaming mode detects a block's direction from its source,
+// tags included (detectTextDirection strips markdown, not HTML), so a short
+// sentence with a citation read left to right (#6229).
 function createDirectionAwareBlock(BlockComponent: StreamdownBlockComponent) {
   function DirectionAwareBlock(props: BlockProps) {
-    const direction = tableDirectiveTextDirection(props.content) ?? props.dir;
-    return <BlockComponent {...props} dir={direction} />;
+    const tree = tableDirectiveParser.parse(props.content);
+    writeTableDirectiveText(tree);
+    return <BlockComponent {...props} dir={textDirection(tree)} />;
   }
 
-  DirectionAwareBlock.displayName = 'DirectionAwareTableBlock';
+  DirectionAwareBlock.displayName = 'DirectionAwareBlock';
   return DirectionAwareBlock;
 }
 
@@ -392,7 +412,8 @@ export function TablePanelStreamdown({
     if (dir !== 'auto' || mode !== 'static' || typeof children !== 'string') {
       return dir;
     }
-    return tableDirectiveTextDirection(children) ?? dir;
+    const tree = tableDirectiveParser.parse(children);
+    return writeTableDirectiveText(tree) ? textDirection(tree) : dir;
   }, [children, dir, mode]);
 
   return (
