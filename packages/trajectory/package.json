@@ -33,7 +33,7 @@
     "@alwaysmeticulous/agent-traces": "3.2.0"
   },
   "devDependencies": {
-    "@zukhruf/fs": "^0.8.144",
-    "@zukhruf/parameterized-test": "^0.8.144"
+    "@zukhruf/fs": "^0.8.179",
+    "@zukhruf/parameterized-test": "^0.8.179"
   }
 }
