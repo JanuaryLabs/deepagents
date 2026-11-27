@@ -1,4 +1,5 @@
 import {
+  type InferUIMessageChunk,
   type LanguageModelUsage,
   type UIMessage,
   type UIMessageChunk,
@@ -15,6 +16,7 @@ import { describe, it } from 'node:test';
 
 import {
   type ChatAgentLike,
+  type ChatDataTypes,
   ContextEngine,
   InMemoryContextStore,
   agent,
@@ -410,7 +412,12 @@ describe('chat() title generation', () => {
 
     const parts = await drain(stream);
     const titlePart = parts.find(
-      (part): part is { type: 'data-chat-title'; data: string } =>
+      (
+        part,
+      ): part is Extract<
+        InferUIMessageChunk<UIMessage<unknown, ChatDataTypes>>,
+        { type: 'data-chat-title' }
+      > =>
         typeof part === 'object' &&
         part !== null &&
         'type' in part &&

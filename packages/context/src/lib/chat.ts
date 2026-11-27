@@ -1,5 +1,6 @@
 import {
   APICallError,
+  type InferUIMessageChunk,
   InvalidToolInputError,
   type LanguageModelUsage,
   NoOutputGeneratedError,
@@ -39,6 +40,13 @@ type ChatConfig<TOOLS extends ToolSet> = StreamOptions<TOOLS> & {
     | undefined
     | Promise<Record<string, unknown> | undefined>;
 };
+
+/**
+ * The data parts `chat()` streams, keyed the AI SDK's way. A host types its
+ * messages `UIMessage<unknown, ChatDataTypes>` and reads `data-chat-title` in
+ * `onData`: the part is transient, so it never lands in a message.
+ */
+export type ChatDataTypes = { 'chat-title': string };
 
 /** The part of an agent's stream result that `chat()` consumes. */
 export interface ChatStreamResult {
@@ -222,7 +230,7 @@ export async function chat<const TOOLS extends ToolSet>(
           type: 'data-chat-title',
           data: titled.title,
           transient: true,
-        });
+        } satisfies InferUIMessageChunk<UIMessage<unknown, ChatDataTypes>>);
       }
     },
   });
