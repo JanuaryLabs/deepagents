@@ -81,6 +81,7 @@ function ChatBotRoot({
   scrollMargin,
 }: ChatBotProps) {
   const { hasSubmitted } = useAgentMeta();
+  const t = useGenaiMessages();
   return (
     <MessageScrollerProvider
       autoScroll={autoScroll}
@@ -92,7 +93,7 @@ function ChatBotRoot({
         data-slot="agent"
         className={cn('@container mx-auto w-full', className)}
       >
-        <MessageScrollerViewport>
+        <MessageScrollerViewport aria-label={t('chat.messagesRegion')}>
           <div
             data-slot="content"
             className={cn(

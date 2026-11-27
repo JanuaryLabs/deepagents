@@ -42,6 +42,8 @@ export type GenaiMessages = {
   /** The host answered 429. */
   'chat.errorRateLimited': string;
   'chat.scrollToBottom': string;
+  /** The accessible name of the scrolling region that holds the messages. */
+  'chat.messagesRegion': string;
   'composer.attachFiles': string;
   'composer.commandMenu': string;
   'composer.send': string;
@@ -173,6 +175,7 @@ export const en: GenaiMessages = {
   'chat.error': 'Something went wrong. Try again.',
   'chat.errorRateLimited': 'Too many requests. Wait a moment, then try again.',
   'chat.scrollToBottom': 'Scroll to the latest message',
+  'chat.messagesRegion': 'Messages',
   'composer.attachFiles': 'Attach files',
   'composer.commandMenu': 'Toggle command menu',
   'composer.send': 'Send prompt',

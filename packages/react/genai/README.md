@@ -114,7 +114,7 @@ The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the 
 
 ## Scrolling
 
-`ChatBot` is built on the Message Scroller of `@zukhruf/shadcn`. When a user message arrives, the view moves it to the top and keeps 64px of the previous message in view, and the answer grows below it. The view does not follow the stream. Pass `autoScroll` to follow it while the reader is at the end. `scrollPreviousItemPeek` and `scrollMargin` (room under a sticky header) are the props of the Message Scroller, passed through.
+`ChatBot` is built on the Message Scroller of `@zukhruf/shadcn`. When a user message arrives, the view moves it to the top and keeps 64px of the previous message in view, and the answer grows below it. The view does not follow the stream. Pass `autoScroll` to follow it while the reader is at the end. `scrollPreviousItemPeek` and `scrollMargin` (room under a sticky header) are the props of the Message Scroller, passed through. The scrolling region is named `chat.messagesRegion` of the catalog.
 
 Under `ChatBot`, the `List` of `CompactMessages` is the content of the scroller, so put each `Item` directly in it. A user `Item` starts a turn.
 

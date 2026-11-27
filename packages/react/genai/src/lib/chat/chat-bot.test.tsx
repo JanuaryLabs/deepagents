@@ -132,4 +132,32 @@ describe('ChatBot', () => {
       cleanup();
     }
   });
+
+  it("names the message region from the host's catalog, and Messages by default", () => {
+    try {
+      const { unmount } = render(<Chat messages={[question, answer]} />, {
+        wrapper: Harness,
+      });
+      const english = screen.queryAllByRole('region', { name: 'Messages' });
+      unmount();
+      render(
+        <GenaiMessagesProvider
+          locale="ar"
+          messages={{ 'chat.messagesRegion': 'الرسائل' }}
+        >
+          <Chat messages={[question, answer]} />
+        </GenaiMessagesProvider>,
+        { wrapper: Harness },
+      );
+
+      expect({
+        english: english.length,
+        arabic: screen.queryAllByRole('region', { name: 'الرسائل' }).length,
+        untranslated: screen.queryAllByRole('region', { name: 'Messages' })
+          .length,
+      }).toEqual({ english: 1, arabic: 1, untranslated: 0 });
+    } finally {
+      cleanup();
+    }
+  });
 });

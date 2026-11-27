@@ -81,6 +81,7 @@ const ar: GenaiMessages = {
   'chat.error': 'حدث خطأ. حاول مجددًا.',
   'chat.errorRateLimited': 'طلبات كثيرة. انتظر قليلًا ثم حاول مجددًا.',
   'chat.scrollToBottom': 'انتقل إلى آخر رسالة',
+  'chat.messagesRegion': 'الرسائل',
   'composer.attachFiles': 'أرفق ملفات',
   'composer.commandMenu': 'بدّل قائمة الأوامر',
   'composer.send': 'أرسل الطلب',
