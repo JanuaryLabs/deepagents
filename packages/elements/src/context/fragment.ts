@@ -9,10 +9,8 @@ import type { ElementDescriptor } from '../lib/types.ts';
  * Create a context fragment advertising the interactive-element catalog to
  * the model.
  *
- * Renders an `<elements>` block as written, in every renderer: the
- * instructions, then one `<element>` per descriptor with its name,
- * description and allowed attributes. It goes through `verbatim()` because
- * the instructions show the tag syntax itself (`<element-name … />`): an
+ * Renders an `<elements>` block as written, in every renderer. It goes
+ * through `verbatim()` because the instructions show the tag syntax itself (`<element-name … />`): an
  * escaping renderer would show the model `&lt;element-name … /&gt;`, and a
  * model that copies the example then writes escaped tags no client draws.
  * Descriptions reach the model as the host wrote them, so a tag inside one
