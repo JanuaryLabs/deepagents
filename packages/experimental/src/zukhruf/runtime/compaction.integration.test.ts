@@ -227,7 +227,7 @@ function declaration(
 
 /** Codex's `<turn_aborted>` marker, recorded after a cancelled running turn. */
 const TURN_ABORTED =
-  '<turn_aborted>\nThe previous turn was interrupted on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>';
+  '<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>';
 
 const conversation = {
   chatId: '48aca921-341e-4c09-839c-954c1134616b',

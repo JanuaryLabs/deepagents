@@ -142,12 +142,9 @@ export interface HttpRuntime extends Pick<
   | 'subscribeConversationStatus'
   | 'unarchiveSession'
 > {
-  observe(conversation: ConversationId): Pick<
-    AgentObservation,
-    'cancel' | 'resume' | 'status'
-  > & {
-    engine: Pick<AgentObservation['engine'], 'getMessages'>;
-  };
+  observe(
+    conversation: ConversationId,
+  ): Pick<AgentObservation, 'cancel' | 'read' | 'resume' | 'status'>;
 }
 
 /** Mount at the host-selected path with `app.route(path, http(runtime))`. */
@@ -376,10 +373,7 @@ export function http(
       };
       await requireSession(runtime, conversation);
       return context.json(
-        {
-          sessionId,
-          messages: await runtime.observe(conversation).engine.getMessages(),
-        },
+        { sessionId, ...(await runtime.observe(conversation).read()) },
         200,
         NO_STORE,
       );

@@ -6,6 +6,7 @@ import {
   type ChatInfo,
   ContextEngine,
   type ContextStore,
+  type StreamData,
   type StreamManager,
   type StreamPart,
   type StreamStatus,
@@ -50,11 +51,19 @@ import {
 } from './conversation-status/projector.ts';
 import { PluginManager } from './plugin/plugin-manager.ts';
 import { SandboxIdleStop } from './sandbox-idle-stop.ts';
+import { type SessionRead, projectSession } from './session-read.ts';
 import { TurnSettlement } from './turn-settlement.ts';
 
 /** How long a delete waits for a running turn to exit before it carries on: Codex's wait_for_thread_shutdown bound. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const SHUTDOWN_POLL_INTERVAL_MS = 50;
+const STREAM_STATUSES: readonly StreamStatus[] = [
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+];
 const LOST_TURN_ERROR = 'turn lost: its queue job was deleted before it ran';
 
 /** Resolving an orphaned continuation's agent failed, so its turn gets the default terminal reconciliation. */
@@ -296,6 +305,53 @@ export class AgentObservation {
   async conversationStatus(): Promise<ConversationStatus> {
     await this.#assertOwner();
     return this.#status.read();
+  }
+
+  /**
+   * The session as a UI reads it, as Codex's `thread/read`: its messages
+   * without the ones written for the model only, its turns with their status,
+   * and the session's status and archive time.
+   */
+  async read(): Promise<SessionRead> {
+    await this.#assertOwner();
+    const thread = await this.#directory.load(this.#conversation);
+    const root = thread && (await this.#directory.rootOf(thread));
+    const [chain, streams, status] = await Promise.all([
+      this.engine.getMessages(),
+      this.#turnStreams(),
+      this.#status.read(),
+    ]);
+    return {
+      ...projectSession(this.#conversation, chain, streams),
+      status,
+      ...(root?.archivedAt === undefined
+        ? {}
+        : { archivedAt: root.archivedAt }),
+    };
+  }
+
+  async #turnStreams(): Promise<
+    Map<string, Pick<StreamData, 'status' | 'error'>>
+  > {
+    const store = this.#streams.store;
+    const prefix = AgentTurnId.prefixOf(this.#conversation);
+    const byStatus = await Promise.all(
+      STREAM_STATUSES.map(async (status) => ({
+        status,
+        ids: await store.listStreamIds({ prefix, status }),
+      })),
+    );
+    const streams = new Map<string, Pick<StreamData, 'status' | 'error'>>();
+    for (const { status, ids } of byStatus) {
+      for (const id of ids) {
+        const error =
+          status === 'failed'
+            ? ((await store.getStream(id))?.error ?? null)
+            : null;
+        streams.set(id, { status, error });
+      }
+    }
+    return streams;
   }
 
   async resume() {

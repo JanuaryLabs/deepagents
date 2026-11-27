@@ -63,12 +63,16 @@ function initializedFrom<Running extends object>(
   return installed.definition === definition;
 }
 
-const emptyEngine = {
-  getMessages: () => Promise.resolve([]),
+const idleSession = {
+  messages: [],
+  turns: [],
+  status: { type: 'idle' as const },
 };
 
 const idleObservation = {
-  engine: emptyEngine,
+  async read() {
+    return idleSession;
+  },
   async cancel() {},
   async resume() {
     return null;
@@ -677,7 +681,7 @@ test('GET /zukhruf/v1/session/:sessionId returns the authenticated conversation'
       observed.push(conversation);
       return {
         ...idleObservation,
-        engine: { getMessages: () => Promise.resolve(messages) },
+        read: () => Promise.resolve({ ...idleSession, messages }),
       };
     },
   });
@@ -687,7 +691,12 @@ test('GET /zukhruf/v1/session/:sessionId returns the authenticated conversation'
   );
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { sessionId, messages });
+  assert.deepEqual(await response.json(), {
+    sessionId,
+    messages,
+    turns: [],
+    status: { type: 'idle' },
+  });
   assert.deepEqual(observed, [{ chatId: sessionId, userId: 'user-1' }]);
 });
 

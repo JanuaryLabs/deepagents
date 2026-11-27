@@ -179,8 +179,12 @@ Mechanism:
    active model call. Terminal writes are conditional, so neither path can be overwritten by a late
    completion or failure. A turn that was running when it was cancelled keeps its partial answer, its
    unfinished tool calls end `output-error` with Codex's `aborted`, and then the executor records
-   Codex's `<turn_aborted>` marker (`INTERRUPTED_NEUTRAL_GUIDANCE`, `core/src/context/turn_aborted.rs`)
-   as a user message, since the context has no developer role; a sub-agent interrupted through
+   Codex's `<turn_aborted>` marker as Codex's ContextualUser mode writes it: a user message with
+   `INTERRUPTED_GUIDANCE` ("The user interrupted the previous turn on purpose…",
+   `core/src/context/turn_aborted.rs`, chosen in `core/src/tasks/mod.rs`), not the multi-agent V2
+   developer message, since the context has no developer role and a system message after the first
+   is not portable across AI SDK providers. It is tagged `generic.turn_aborted` (see Session read),
+   so it stays in the model's history and out of a UI's; a sub-agent interrupted through
    `interrupt_agent` gets it too. `persist` resolves only after its source has settled, so chat's
    `onEnd` has written the partial answer before the marker. The executor records it when persist's
    cancel watcher detected the cancel (`onCancelDetected`); a turn cancelled while queued or after it
@@ -1300,6 +1304,32 @@ lifecycle}` per member.
   `ConversationNotFoundError`. It writes under the same lock, so a title model still running for
   the first turn keeps the rename. `POST /session/:sessionId/title` with `{ title }` answers 204.
   Nothing is published on `GET /events` for a rename yet (Codex sends `thread/name/updated`).
+
+## Session read _(Built, #6056 step A)_
+
+- **A UI reads a projection, not the chain (Codex `thread/read`).** `AgentObservation.read()`,
+  served as `GET /session/:sessionId`, returns `{ messages, turns, status, archivedAt? }` (HTTP adds
+  `sessionId`). Codex builds a thread's UI items only from real user input and agent output
+  (`protocol/thread_history.rs`); the response items it writes for the model stay in the rollout.
+  The raw chain stays `observe().engine.getMessages()`.
+- **Model-only user messages are tagged when they are written.** `metadata.zukhruf.contentKind`
+  carries Codex's `ContextualUserFragment::content_kind`: `generic.turn_aborted` for the marker,
+  `skills.selected_skill_instructions` for a mentioned skill's instructions
+  (`ext/skills/src/fragments.rs`), and `multi_agent.inter_agent_message` for mail, at a turn's start,
+  on a mailbox wake and mid-turn alike (`core/src/context/inter_agent_message.rs`). The kind sits
+  beside the existing payload keys (`skillInstructions`, `interAgentCommunication`), which stay as
+  they are. The projection drops a user message by its tag, or when context marks it a synthetic
+  reminder (`isSyntheticReminderMessage`), never by its text.
+- **Turns.** `turns` is `[{ turnId, status, messageIds, error? }]`, Codex's `Turn` with its items as
+  the ids of messages in `messages`. One walk of the chain groups them: a user message opens its turn
+  (`AgentTurnId.fromRequest` of its id, as enqueue derives it); an assistant message whose id is
+  another turn id of the conversation opens that turn (a mailbox wake has no user message); any
+  other assistant message, a mid-turn segment included, joins the open turn. An assistant
+  placeholder with no parts is not shown. The status comes from the turn's stream, read with one
+  `listStreamIds` per stream status: `completed` and `failed` (with the stream's `error`) as they
+  are, `cancelled` as Codex's `interrupted`, `running` and a reopened `queued` as `inProgress`. A
+  turn with no stream row, forked from a parent's history, reads `completed`. A turn queued with
+  nothing in the chain is not listed; whether the session is busy is `status`.
 
 ## Stacks: one runtime, explicit adapter composition
 

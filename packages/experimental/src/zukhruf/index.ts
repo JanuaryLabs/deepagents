@@ -43,6 +43,7 @@ export type * from './runtime/conversation-status/change-source.ts';
 export type * from './runtime/conversation-status/child-progress.ts';
 export * from './runtime/conversation-status/pg-boss-change-source.ts';
 export type * from './runtime/conversation-status/projector.ts';
+export type * from './runtime/session-read.ts';
 export * from './sandbox/define.ts';
 export type * from './sandbox/sandbox-idle-wake.ts';
 export * from './storage/agent-storage.ts';

@@ -508,10 +508,6 @@ function sessionArchived(sessionId: string) {
 
 const archived = { status: 204, cacheControl: 'no-store', body: null };
 
-/** Codex's `<turn_aborted>` marker, recorded after a turn the archive interrupts. */
-const TURN_ABORTED =
-  '<turn_aborted>\nThe previous turn was interrupted on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>';
-
 void describe.each(storages, ({ name, open }) =>
   describe(name, () => {
     test(`${name}: POST /session/:sessionId/archive hides the session from GET /history and lists it under ?archived=true while GET /session still reads it, refuses its turns and a second archive with 409 session-archived; POST /session/:sessionId/unarchive answers 200 with its history item, puts it back in GET /history and admits turns again, and a second unarchive answers 409 session-not-archived`, async (t) => {
@@ -696,7 +692,7 @@ void describe.each(storages, ({ name, open }) =>
           held: ['cancelled'],
           whileArchived: 'queued',
           restored: 200,
-          userTexts: ['hold', TURN_ABORTED, 'queued behind'],
+          userTexts: ['hold', 'queued behind'],
         },
       );
     });
@@ -742,7 +738,7 @@ void describe.each(storages, ({ name, open }) =>
           parked: [queued],
           unarchived: 200,
           lastPrompt: 'queued behind',
-          userTexts: ['hold', TURN_ABORTED, 'queued behind'],
+          userTexts: ['hold', 'queued behind'],
         },
       );
     });
@@ -1123,7 +1119,7 @@ void describe.each(storages, ({ name, open }) =>
         async () => {
           const run = await tasks.getRun('user-1', resumedRun.id);
           assert.equal(run.status, 'completed');
-          assert.deepStrictEqual((await userTexts(app, sessionId)).slice(3), [
+          assert.deepStrictEqual((await userTexts(app, sessionId)).slice(2), [
             'yearly',
             'daily',
           ]);
@@ -1150,7 +1146,7 @@ void describe.each(storages, ({ name, open }) =>
           cron: [{ generation: 2, nextRunAt: '2030-01-02T12:00:00.000Z' }],
           dispatching: undefined,
           refused: `chat "${sessionId}" is archived`,
-          textsWhileArchived: ['create cron', 'hold', TURN_ABORTED],
+          textsWhileArchived: ['create cron', 'hold'],
           restored: 200,
           resumed: 'completed',
         },

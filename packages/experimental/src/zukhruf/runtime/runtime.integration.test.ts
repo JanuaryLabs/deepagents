@@ -4327,7 +4327,7 @@ function environmentSandbox(environment: VirtualSandboxEnvironment) {
 }
 
 describe('zukhruf runtime — explicit skill mentions', () => {
-  it('injects each mentioned skill once, in catalog order, after the user message, and keeps it in history', async () => {
+  it('injects each mentioned skill once, in catalog order, after the user message, and keeps it in history, which the session read leaves out', async () => {
     const prompts: LanguageModelV4Prompt[] = [];
     const model = promptRecordingModel(prompts);
     const environment = new VirtualSandboxEnvironment();
@@ -4355,6 +4355,15 @@ describe('zukhruf runtime — explicit skill mentions', () => {
     assert.deepStrictEqual(
       chunks.filter((chunk) => chunk.type === 'data-warning'),
       [],
+    );
+    const read = await h.runtime.observe(conversation).read();
+    assert.deepStrictEqual(
+      read.messages.flatMap(({ role, parts }) =>
+        role === 'user'
+          ? parts.flatMap((part) => (part.type === 'text' ? [part.text] : []))
+          : [],
+      ),
+      [input, 'thanks'],
     );
   });
 
@@ -4749,7 +4758,7 @@ describe('zukhruf runtime — explicit skill mentions', () => {
 });
 
 const TURN_ABORTED =
-  '<turn_aborted>\nThe previous turn was interrupted on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>';
+  '<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>';
 
 /** A non-system message of a prompt: its role and each part, a text part as its text. */
 function conversationOf(prompt: LanguageModelV4Prompt | undefined) {
@@ -4868,7 +4877,7 @@ describe('zukhruf runtime — interrupted turn marker', () => {
     );
   });
 
-  it('records the turn_aborted marker as a user message of exactly one text part', async () => {
+  it('records the turn_aborted marker as a user message of exactly one text part, tagged generic.turn_aborted', async () => {
     const prompts: LanguageModelV4Prompt[] = [];
     const model = interruptibleModel(prompts, [
       { type: 'text-start', id: 't1' },
@@ -4892,9 +4901,13 @@ describe('zukhruf runtime — interrupted turn marker', () => {
     )[2];
     assert.ok(marker, 'the chain holds no third message');
     assert.equal(marker.role, 'user');
-    assert.deepStrictEqual(marker.parts, [
-      { type: 'text', text: TURN_ABORTED },
-    ]);
+    assert.deepStrictEqual(
+      { parts: marker.parts, metadata: marker.metadata },
+      {
+        parts: [{ type: 'text', text: TURN_ABORTED }],
+        metadata: { zukhruf: { contentKind: 'generic.turn_aborted' } },
+      },
+    );
   });
 
   it('settles a running tool call as aborted before the turn_aborted marker', async (t) => {

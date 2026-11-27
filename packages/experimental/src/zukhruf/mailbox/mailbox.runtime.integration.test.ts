@@ -330,6 +330,24 @@ describe('zukhruf runtime mailbox delivery', () => {
       'consumed mail is not delivered twice',
     );
     assert.equal(await h.mailboxStore.hasPending(reviewer), false);
+    const read = await h.runtime.observe(researcher).read();
+    assert.deepStrictEqual(
+      {
+        roles: read.messages.map(({ role }) => role),
+        turns: read.turns,
+      },
+      {
+        roles: ['assistant'],
+        turns: [
+          {
+            turnId: wake.streamId,
+            status: 'completed',
+            messageIds: [wake.streamId],
+          },
+        ],
+      },
+      'the session read leaves the mail out and lists the wake as its own turn',
+    );
   });
 
   it('serializes mail behind an active target and exposes it at the next supported turn boundary', async (t) => {

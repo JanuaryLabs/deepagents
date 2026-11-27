@@ -41,6 +41,7 @@ import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
 import type { AgentPluginToolContext } from './agent-runtime.ts';
 import type { ApprovalController } from './approval-controller.ts';
 import { createCompaction } from './compaction.ts';
+import { ModelOnlyContentKind, contentKindMetadata } from './content-kind.ts';
 import type { ConversationSandboxes } from './conversation-sandboxes.ts';
 import {
   type AgentSkills,
@@ -452,7 +453,12 @@ export class AgentTurnExecutor {
         id: crypto.randomUUID(),
         role: 'user',
         parts: [{ type: 'text', text }],
-        metadata: { skillInstructions: { name, path } },
+        metadata: {
+          skillInstructions: { name, path },
+          ...contentKindMetadata(
+            ModelOnlyContentKind.selectedSkillInstructions,
+          ),
+        },
       }),
     );
     if (turn.kind === 'message') {
@@ -654,7 +660,10 @@ export class AgentTurnExecutor {
           text: this.#renderInterAgentCommunication(communication),
         },
       ],
-      metadata: { interAgentCommunication: communication },
+      metadata: {
+        interAgentCommunication: communication,
+        ...contentKindMetadata(ModelOnlyContentKind.interAgentMessage),
+      },
     };
   }
 

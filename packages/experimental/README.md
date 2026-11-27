@@ -246,6 +246,23 @@ plus health checks. `DELETE /session/:sessionId` deletes a session (204),
 `POST /session/:sessionId/archive` archives it (204), and
 `POST /session/:sessionId/unarchive` answers 200 with its history item, and
 `POST /session/:sessionId/title` with `{ "title": "..." }` renames it (204).
+`GET /session/:sessionId` reads the session as Codex's `thread/read` does:
+`{ sessionId, messages, turns, status, archivedAt? }`, which in process is
+`runtime.observe(conversation).read()`. `messages` is the chain without the
+user messages written for the model only, which are tagged when they are
+written with `metadata.zukhruf.contentKind`, as Codex names them:
+`generic.turn_aborted` (the `<turn_aborted>` marker after an interrupted
+turn), `skills.selected_skill_instructions` (a `$skill` the message mentions)
+and `multi_agent.inter_agent_message` (mail from another agent); context's
+synthetic reminders are left out too. `turns` is
+`[{ turnId, status, messageIds, error? }]`, where `status` is `completed`,
+`interrupted` (a cancelled turn, by Stop or archive), `failed` (with the
+stream's `error`) or `inProgress`, and `messageIds` lists the turn's messages
+in `messages`, so a client draws an interrupted turn as a notice after its last
+message. A turn still queued with nothing in the chain is not listed. `status`
+is the session's `ConversationStatus` and `archivedAt` is set while it is
+archived. The raw chain, model-only messages included, stays
+`observe(conversation).engine.getMessages()`.
 `GET /history` lists the sessions that are not archived, and
 `GET /history?archived=true` the archived ones. `GET /events` tells the owner
 of each session and sub-agent chat that was deleted, archived or unarchived
