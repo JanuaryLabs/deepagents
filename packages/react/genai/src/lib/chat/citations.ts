@@ -5,6 +5,8 @@ import { citationsInReadingOrder } from './citation-order.ts';
 export interface CitationSource {
   url: string;
   title?: string;
+  /** The line under the title, such as a journal, a product or a site name. */
+  description?: string;
 }
 
 /** A citation of a web page, the only kind react-genai draws. */

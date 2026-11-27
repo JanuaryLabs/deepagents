@@ -28,6 +28,7 @@ export function CitationPill({
   // A source-url's url is provider data typed only as string, and new URL()
   // would throw on a malformed one and take the whole message down.
   const site = URL.parse(source.url)?.hostname ?? source.url;
+  const description = source.description ?? (source.title ? site : undefined);
   return (
     <sup className="ml-0.5 inline-block">
       <Popover>
@@ -49,9 +50,13 @@ export function CitationPill({
             >
               {source.title ?? site}
             </PopoverTitle>
-            {source.title ? (
-              <PopoverDescription dir="auto" title={site} className="truncate">
-                {site}
+            {description ? (
+              <PopoverDescription
+                dir="auto"
+                title={description}
+                className="truncate"
+              >
+                {description}
               </PopoverDescription>
             ) : null}
           </PopoverHeader>

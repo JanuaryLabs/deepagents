@@ -161,3 +161,52 @@ test('a long source title stays whole for a screen reader and on hover, though t
     cleanup();
   }
 });
+
+test('a citation with a description shows it under the title in place of the site, whole on hover (#6087)', async () => {
+  const user = userEvent.setup();
+  const description =
+    'SERTRALINE (SERTRALINE HYDROCHLORIDE) TABLET, FILM COATED [READYMEDS]';
+  try {
+    render(
+      <CitationPill
+        source={{
+          url: 'https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=1',
+          title: 'Serotonergic Drugs:',
+          description,
+        }}
+        index={8}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Source 8' }));
+
+    expect({
+      title: screen.getByTitle('Serotonergic Drugs:').textContent,
+      description: screen.getByTitle(description).textContent,
+      direction: screen.getByTitle(description).getAttribute('dir'),
+      site: screen.queryByText('dailymed.nlm.nih.gov'),
+    }).toEqual({
+      title: 'Serotonergic Drugs:',
+      description,
+      direction: 'auto',
+      site: null,
+    });
+  } finally {
+    cleanup();
+  }
+});
+
+test('a citation with no description shows the site under the title (#6087)', async () => {
+  const user = userEvent.setup();
+  try {
+    render(<CitationPill source={source} index={9} />);
+
+    await user.click(screen.getByRole('button', { name: 'Source 9' }));
+
+    expect(screen.getByTitle('pubmed.ncbi.nlm.nih.gov').textContent).toBe(
+      'pubmed.ncbi.nlm.nih.gov',
+    );
+  } finally {
+    cleanup();
+  }
+});
