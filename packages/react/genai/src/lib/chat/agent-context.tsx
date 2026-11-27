@@ -21,6 +21,7 @@ import {
 import type { ComponentRegistry } from '../tools/registry.ts';
 import { ChatManager, type ChatSubmission } from './chat-manager.ts';
 import { useAgentChatSetup } from './chat.tsx';
+import { prefillTransport } from './prefill-transport.ts';
 import type { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
 
 export interface AgentConfigContextValue {
@@ -83,9 +84,13 @@ export function AgentProvider({
   onFinish?: ChatOnFinishCallback<UIMessage<unknown, UIDataTypes, UITools>>;
   onResetChat: (chatId: string) => void;
 }) {
+  const sendingTransport = useMemo(
+    () => prefillTransport(transport),
+    [transport],
+  );
   const agent = useAgentChatSetup({
     chatId,
-    transport,
+    transport: sendingTransport,
     registry,
     initialMessages,
     resume,

@@ -19,6 +19,7 @@ import {
   persistedPromptOf,
 } from './chat-manager.ts';
 import { useAgentChatSetup } from './chat.tsx';
+import { prefillTransport } from './prefill-transport.ts';
 import { type PendingPrefill, writePrefill } from './prefill.ts';
 
 type TestUIMessage = UIMessage<unknown, UIDataTypes, UITools>;
@@ -151,11 +152,12 @@ function renderChatManager(
   },
 ) {
   const chatId = options.chatId ?? crypto.randomUUID();
+  const transport = prefillTransport(options.transport);
   const rendered = renderHook(() => {
     const helpers = useAgentChatSetup({
       chatId,
       initialMessages: options.initialMessages,
-      transport: options.transport,
+      transport,
     });
     const [manager] = useState(
       () => new ChatManager({ ...managerOptions, chat: helpers }),

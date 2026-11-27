@@ -109,11 +109,13 @@ export class ChatManager {
 
   /** While a response is in flight the chat queues the message, and sends it once that response finishes. */
   private send({
+    id,
     prompt,
     persistedPrompt,
     metadata,
-  }: Omit<ChatSubmission, 'files'>): void {
+  }: Omit<ChatSubmission, 'files'> & { id?: string }): void {
     void this.chat.sendMessage({
+      id,
       role: 'user',
       parts: [{ type: 'text', text: prompt }],
       metadata: { ...metadata, persistedPrompt },
@@ -131,7 +133,15 @@ export class ChatManager {
     this.chat.setMessages(messages);
   }
 
+  /** The user chose not to send a prefill that is still pending, so it is cleared. */
   stop(): void {
+    const prefill = readPrefill();
+    if (
+      prefill &&
+      this.chat.messages.some((message) => message.id === prefill.messageId)
+    ) {
+      clearPrefill();
+    }
     void this.chat.stop();
   }
 
@@ -143,13 +153,22 @@ export class ChatManager {
     this.onResetChat(nextChatId);
   }
 
+  /**
+   * Sends the chat's pending prefill under its own message id. The transport
+   * AgentProvider wraps clears it once a turn holding that message is
+   * accepted, so a send that fails leaves it for the chat's next mount.
+   */
   consumePrefill(chatId: string): void {
     const prefill = readPrefill();
     if (!prefill || prefill.targetChatId !== chatId) return;
-    clearPrefill();
-    void this.submit({
-      prompt: prefill.prompt,
-      persistedPrompt: prefill.prompt,
+    const currentChatId = this.chat.id;
+    void this.submissions.run(async () => {
+      this.assertCurrentChat(currentChatId);
+      this.send({
+        id: prefill.messageId,
+        prompt: prefill.prompt,
+        persistedPrompt: prefill.prompt,
+      });
     });
   }
 

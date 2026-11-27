@@ -1,6 +1,8 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
+import { Msw } from '@zukhruf/testing/msw';
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
+import { HttpResponse, http } from 'msw';
 import { StrictMode, useState } from 'react';
 import { expect, test, vi } from 'vitest';
 
@@ -12,6 +14,7 @@ import {
 } from './agent-context.tsx';
 import { persistedPromptOf } from './chat-manager.ts';
 import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
+import { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
 
 type SendRequest = Parameters<ChatTransport<UIMessage>['sendMessages']>[0];
 type ReconnectRequest = Parameters<
@@ -808,6 +811,561 @@ test('a provider that unmounts before its deferred send sends nothing and keeps 
       sends: transport.sends.length,
       pending: readPrefill()?.prompt,
     }).toEqual({ sends: 0, pending: 'first question' });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+const msw = new Msw();
+/** Same origin as the page, as a host mounts Zukhruf: a cross-origin POST would add a CORS preflight. */
+const zukhrufApi = new URL('/zukhruf/v1/session', location.href).href;
+
+/** The questions the chat POSTed to start a turn, in order. */
+async function postedQuestions(requests: readonly Request[]) {
+  const turns = requests.filter(
+    (request) => request.method === 'POST' && !request.url.endsWith('/cancel'),
+  );
+  return Promise.all(
+    turns.map(async (request) => {
+      const body: { message: UIMessage } = await request.clone().json();
+      return textsOf([body.message]);
+    }),
+  );
+}
+
+function StatusProbe() {
+  const { status } = useAgentMessages();
+  return <output aria-label="status">{status}</output>;
+}
+
+function ZukhrufPage({ chatId }: { chatId: string }) {
+  return (
+    <AgentProvider
+      chatId={chatId}
+      transport={new ZukhrufChatTransport({ api: zukhrufApi })}
+      onResetChat={() => {}}
+    >
+      <StatusProbe />
+      <MessagesProbe />
+    </AgentProvider>
+  );
+}
+
+/** Zukhruf's stream of every accepted turn: one text part, 'The answer.' */
+function answeringStream() {
+  return http.get(
+    `${zukhrufApi}/:sessionId/stream`,
+    () =>
+      new HttpResponse(
+        [
+          { type: 'start' },
+          { type: 'text-start', id: 't1' },
+          { type: 'text-delta', id: 't1', delta: 'The answer.' },
+          { type: 'text-end', id: 't1' },
+          { type: 'finish' },
+        ]
+          .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
+          .join('') + 'data: [DONE]\n\n',
+        {
+          headers: {
+            'content-type': 'text/event-stream',
+            'x-vercel-ai-ui-message-stream': 'v1',
+          },
+        },
+      ),
+  );
+}
+
+test('a prefill whose first POST fails is sent again after a reload (#6146)', async () => {
+  const chatId = 'chat-reload-after-500';
+  await using interception = msw.intercept(
+    http.post(`${zukhrufApi}/:sessionId`, () =>
+      HttpResponse.json({ error: 'down' }, { status: 500 }),
+    ),
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    const first = render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('error');
+    });
+    expect(await postedQuestions(interception.requests)).toEqual([
+      'first question',
+    ]);
+    first.unmount();
+
+    render(<ZukhrufPage chatId={chatId} />);
+
+    await vi.waitFor(async () => {
+      expect(await postedQuestions(interception.requests)).toEqual([
+        'first question',
+        'first question',
+      ]);
+    });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a prefill whose POST is accepted is not sent again after a reload (#6146)', async () => {
+  const chatId = 'chat-reload-after-202';
+  await using interception = msw.intercept(
+    http.post(`${zukhrufApi}/:sessionId`, ({ params }) =>
+      HttpResponse.json(
+        { ok: true, sessionId: params.sessionId, turnId: 'turn-1' },
+        { status: 202 },
+      ),
+    ),
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+    answeringStream(),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    const first = render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(() => {
+      expect(screen.getByText('The answer.')).toBeInTheDocument();
+    });
+    first.unmount();
+
+    render(<ZukhrufPage chatId={chatId} />);
+    await act(async () => {});
+
+    expect({
+      questions: await postedQuestions(interception.requests),
+      pending: readPrefill(),
+    }).toEqual({ questions: ['first question'], pending: null });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a prefill whose POST fails on the network is sent again after a reload (#6146)', async () => {
+  const chatId = 'chat-reload-after-network-error';
+  await using interception = msw.intercept(
+    http.post(`${zukhrufApi}/:sessionId`, () => HttpResponse.error()),
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    const first = render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('error');
+    });
+    first.unmount();
+
+    render(<ZukhrufPage chatId={chatId} />);
+
+    await vi.waitFor(async () => {
+      expect(await postedQuestions(interception.requests)).toEqual([
+        'first question',
+        'first question',
+      ]);
+    });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a prefill is sent under the same message id on every attempt, so Zukhruf derives the same turn id (#6146)', async () => {
+  const chatId = 'chat-same-message-id';
+  await using interception = msw.intercept(
+    http.post(`${zukhrufApi}/:sessionId`, () =>
+      HttpResponse.json({ error: 'down' }, { status: 500 }),
+    ),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  const stored = readPrefill();
+
+  try {
+    const first = render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('error');
+    });
+    first.unmount();
+    render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(() => {
+      expect(interception.requests).toHaveLength(2);
+    });
+
+    const messageIds = await Promise.all(
+      interception.requests.map(async (request) => {
+        const body: { message: UIMessage } = await request.clone().json();
+        return body.message.id;
+      }),
+    );
+    expect(messageIds).toEqual([stored?.messageId, stored?.messageId]);
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+function StopButton() {
+  const { stop } = useAgent();
+  return (
+    <button type="button" onClick={stop}>
+      Stop
+    </button>
+  );
+}
+
+/** Answers the first POST only when its request is aborted or the test releases it, and every later POST with a 500. */
+function heldFirstPost() {
+  const released = Promise.withResolvers<void>();
+  let posts = 0;
+  return {
+    release: () => released.resolve(),
+    handler: http.post(`${zukhrufApi}/:sessionId`, async ({ request }) => {
+      posts += 1;
+      if (posts > 1)
+        return HttpResponse.json({ error: 'down' }, { status: 500 });
+      await Promise.race([
+        released.promise,
+        new Promise((resolve) =>
+          request.signal.addEventListener('abort', resolve, { once: true }),
+        ),
+      ]);
+      return HttpResponse.error();
+    }),
+  };
+}
+
+test('a prefill the user stops before Zukhruf answers is cleared and not sent after a reload (#6146)', async () => {
+  const chatId = 'chat-reload-after-stop';
+  const user = userEvent.setup();
+  const firstPost = heldFirstPost();
+  await using interception = msw.intercept(
+    firstPost.handler,
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    const first = render(
+      <AgentProvider
+        chatId={chatId}
+        transport={new ZukhrufChatTransport({ api: zukhrufApi })}
+        onResetChat={() => {}}
+      >
+        <StatusProbe />
+        <StopButton />
+      </AgentProvider>,
+    );
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('submitted');
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop' }));
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('ready');
+    });
+    first.unmount();
+
+    render(<ZukhrufPage chatId={chatId} />);
+    await act(async () => {});
+
+    expect({
+      questions: await postedQuestions(interception.requests),
+      pending: readPrefill(),
+    }).toEqual({ questions: ['first question'], pending: null });
+  } finally {
+    firstPost.release();
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a prefill whose page unmounts before Zukhruf answers is sent again on the next mount (#6146)', async () => {
+  const chatId = 'chat-remount-while-pending';
+  const firstPost = heldFirstPost();
+  await using interception = msw.intercept(
+    firstPost.handler,
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    const first = render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(async () => {
+      expect(await postedQuestions(interception.requests)).toEqual([
+        'first question',
+      ]);
+    });
+    first.unmount();
+
+    render(<ZukhrufPage chatId={chatId} />);
+
+    await vi.waitFor(async () => {
+      expect(await postedQuestions(interception.requests)).toEqual([
+        'first question',
+        'first question',
+      ]);
+    });
+  } finally {
+    firstPost.release();
+    clearPrefill();
+    cleanup();
+  }
+});
+
+function RetryButton() {
+  const { regenerate } = useAgentMessages();
+  return (
+    <button type="button" onClick={() => void regenerate()}>
+      Retry
+    </button>
+  );
+}
+
+test('a prefill whose failed POST is retried and accepted is not sent again after a reload (#6146)', async () => {
+  const chatId = 'chat-reload-after-retry';
+  const user = userEvent.setup();
+  let posts = 0;
+  await using interception = msw.intercept(
+    http.post(`${zukhrufApi}/:sessionId`, ({ params }) => {
+      posts += 1;
+      return posts === 1
+        ? HttpResponse.json({ error: 'down' }, { status: 500 })
+        : HttpResponse.json(
+            { ok: true, sessionId: params.sessionId, turnId: 'turn-1' },
+            { status: 202 },
+          );
+    }),
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+    answeringStream(),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    const first = render(
+      <AgentProvider
+        chatId={chatId}
+        transport={new ZukhrufChatTransport({ api: zukhrufApi })}
+        onResetChat={() => {}}
+      >
+        <StatusProbe />
+        <MessagesProbe />
+        <RetryButton />
+      </AgentProvider>,
+    );
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('error');
+    });
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => {
+      expect(screen.getByText('The answer.')).toBeInTheDocument();
+    });
+    first.unmount();
+
+    render(<ZukhrufPage chatId={chatId} />);
+    await act(async () => {});
+
+    expect({
+      questions: await postedQuestions(interception.requests),
+      pending: readPrefill(),
+    }).toEqual({
+      questions: ['first question', 'first question'],
+      pending: null,
+    });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+function NewChatButton() {
+  const { resetChat } = useAgent();
+  return (
+    <button type="button" onClick={() => resetChat('second question')}>
+      New chat
+    </button>
+  );
+}
+
+test('a prefill accepted after the user starts a new chat with a question leaves the new chat its prefill (#6146)', async () => {
+  const chatId = 'chat-accepted-after-new-chat';
+  const user = userEvent.setup();
+  const answer = Promise.withResolvers<void>();
+  await using interception = msw.intercept(
+    http.post(`${zukhrufApi}/:sessionId`, async ({ params }) => {
+      await answer.promise;
+      return HttpResponse.json(
+        { ok: true, sessionId: params.sessionId, turnId: 'turn-1' },
+        { status: 202 },
+      );
+    }),
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+    http.get(
+      `${zukhrufApi}/:sessionId/stream`,
+      () =>
+        new HttpResponse('data: [DONE]\n\n', {
+          headers: {
+            'content-type': 'text/event-stream',
+            'x-vercel-ai-ui-message-stream': 'v1',
+          },
+        }),
+    ),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    render(
+      <AgentProvider
+        chatId={chatId}
+        transport={new ZukhrufChatTransport({ api: zukhrufApi })}
+        onResetChat={() => {}}
+      >
+        <StatusProbe />
+        <NewChatButton />
+      </AgentProvider>,
+    );
+    await vi.waitFor(async () => {
+      expect(await postedQuestions(interception.requests)).toEqual([
+        'first question',
+      ]);
+    });
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    answer.resolve();
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('ready');
+    });
+
+    expect(readPrefill()?.prompt).toBe('second question');
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a prefill whose POST failed is cleared once a newer question in the chat is accepted (#6146)', async () => {
+  const chatId = 'chat-newer-question-accepted';
+  const user = userEvent.setup();
+  let posts = 0;
+  await using interception = msw.intercept(
+    http.post(`${zukhrufApi}/:sessionId`, ({ params }) => {
+      posts += 1;
+      return posts === 1
+        ? HttpResponse.json({ error: 'down' }, { status: 500 })
+        : HttpResponse.json(
+            { ok: true, sessionId: params.sessionId, turnId: 'turn-2' },
+            { status: 202 },
+          );
+    }),
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+    answeringStream(),
+  );
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    const first = render(
+      <AgentProvider
+        chatId={chatId}
+        transport={new ZukhrufChatTransport({ api: zukhrufApi })}
+        onResetChat={() => {}}
+      >
+        <StatusProbe />
+        <MessagesProbe />
+        <SubmitHarness />
+      </AgentProvider>,
+    );
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('error');
+    });
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await vi.waitFor(() => {
+      expect(screen.getByText('The answer.')).toBeInTheDocument();
+    });
+    first.unmount();
+
+    render(<ZukhrufPage chatId={chatId} />);
+    await act(async () => {});
+
+    expect({
+      questions: await postedQuestions(interception.requests),
+      pending: readPrefill(),
+    }).toEqual({ questions: ['first question', 'hello'], pending: null });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a prefill sent into a chat that already has history is not sent again after a reload (#6146)', async () => {
+  const chatId = 'chat-prefill-after-history';
+  await using interception = msw.intercept(
+    http.post(`${zukhrufApi}/:sessionId`, ({ params }) =>
+      HttpResponse.json(
+        { ok: true, sessionId: params.sessionId, turnId: 'turn-2' },
+        { status: 202 },
+      ),
+    ),
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+    answeringStream(),
+  );
+  const history: UIMessage[] = [
+    {
+      id: 'earlier-question',
+      role: 'user',
+      parts: [{ type: 'text', text: 'earlier question' }],
+      metadata: { persistedPrompt: 'earlier question' },
+    },
+    {
+      id: 'earlier-answer',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'earlier answer' }],
+    },
+  ];
+  writePrefill({ prompt: 'first question', targetChatId: chatId });
+
+  try {
+    const page = () => (
+      <AgentProvider
+        chatId={chatId}
+        initialMessages={history}
+        transport={new ZukhrufChatTransport({ api: zukhrufApi })}
+        onResetChat={() => {}}
+      >
+        <MessagesProbe />
+      </AgentProvider>
+    );
+    const first = render(page());
+    await vi.waitFor(() => {
+      expect(screen.getByText('The answer.')).toBeInTheDocument();
+    });
+    first.unmount();
+
+    render(page());
+    await act(async () => {});
+
+    expect({
+      questions: await postedQuestions(interception.requests),
+      pending: readPrefill(),
+    }).toEqual({ questions: ['first question'], pending: null });
   } finally {
     clearPrefill();
     cleanup();
