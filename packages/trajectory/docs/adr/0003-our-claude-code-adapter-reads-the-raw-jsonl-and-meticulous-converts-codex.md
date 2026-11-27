@@ -1,6 +1,6 @@
 # Our Claude Code adapter reads the raw JSONL, and meticulous converts Codex
 
-Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107). Amended on 2026-11-27 while building: `CodexThread` carries its `subagents` (every thread under it, flat), which `CodexStore.threads()` groups from each rollout's `session_meta` with meticulous's own rule (`parentIdOf`, `findRootId`, `compareRollouts`); `CodexAdapter` hands them to `convertCodexSession`, which links each to the call that spawned it (`collab_agent_spawn_end`). meticulous's v1.7 steps map onto this package's union field by field, and an image whose media type ATIF does not name becomes a text part that names it.
 
 ## Context
 

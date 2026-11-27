@@ -1,8 +1,7 @@
 # @deepagents/trajectory
 
-> **Status:** the Claude Code adapter ships first. `ClaudeCodeStore` and the
-> Codex store and adapter follow (#6107). Each decision is in
-> [docs/adr](./docs/adr).
+> **Status:** Claude Code and Codex read today (#6107); other agents come as
+> adapters. Each decision is in [docs/adr](./docs/adr).
 
 Read a coding agent's stored sessions (Claude Code transcripts, Codex rollouts)
 as [ATIF](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md)
@@ -154,7 +153,13 @@ export class CodexStore {
   constructor(options: { root: string }); // the folder that holds sessions/ and archived_sessions/
   threads(options: { since: Date }): AsyncIterable<CodexThread>;
 }
-export class CodexThread { readonly threadId: string; readonly rolloutPaths: readonly string[] }
+export class CodexThread {
+  constructor(threadId: string, rolloutPaths: readonly string[], subagents?: readonly CodexSubagentThread[]);
+  readonly threadId: string;
+  readonly rolloutPaths: readonly string[]; // the original first, then any a revert wrote
+  readonly subagents: readonly CodexSubagentThread[]; // every thread under it, flat
+}
+export interface CodexSubagentThread { readonly threadId: string; readonly rolloutPaths: readonly string[] }
 export class CodexAdapter implements Adapter<CodexThread> { readonly agent = 'codex' }
 
 // ATIF v1.8, ported from Harbor's models (docs/ported-from-harbor-atif.md).
@@ -168,15 +173,15 @@ export class SessionReadError extends Error { readonly path: string } // missing
 
 ## What each call does underneath
 
-| Call                                      | Underneath                                                                                                                                                                                                                                              |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ClaudeCodeSession.fromTranscriptPath(p)` | Takes the id from the file name; touches no disk.                                                                                                                                                                                                       |
-| `ClaudeCodeStore.sessions({ since })`     | Walks `projects/*/*.jsonl` and yields each main transcript changed since `since`, newest first. Subagent files are not sessions.                                                                                                                        |
-| `ClaudeCodeStore.session(id)`             | Looks for `projects/*/<id>.jsonl`.                                                                                                                                                                                                                      |
-| `ClaudeCodeStore.chain(s)`                | Reads each transcript's `derived-from` entry back to the first segment. It follows every `claude_code_session` it names (any `via`), skips ids already in the chain, looks beside the current transcript first, then in every project.                  |
-| `ClaudeCodeAdapter.read(s)`               | Streams the transcript line by line. It maps every entry by the [mapping table](#claude-code-entry--atif), pairs each `tool_use` with its `tool_result` by id, and reads `<id>/subagents/agent-*.jsonl` plus `.meta.json` into `subagent_trajectories`. |
-| `CodexStore.threads({ since })`           | Walks `sessions/` and `archived_sessions/` (`.jsonl`, `.jsonl.zst`) and groups rollouts by the parent ids in each `session_meta`.                                                                                                                       |
-| `CodexAdapter.read(t)`                    | Decodes `.zst` with `node:zlib` `zstdDecompressSync`, then calls meticulous's `convertCodexSession`, and writes `schema_version: ATIF-v1.8`.                                                                                                            |
+| Call                                      | Underneath                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClaudeCodeSession.fromTranscriptPath(p)` | Takes the id from the file name; touches no disk.                                                                                                                                                                                                                                                             |
+| `ClaudeCodeStore.sessions({ since })`     | Walks `projects/*/*.jsonl` and yields each main transcript changed since `since`, newest first. Subagent files are not sessions.                                                                                                                                                                              |
+| `ClaudeCodeStore.session(id)`             | Looks for `projects/*/<id>.jsonl`.                                                                                                                                                                                                                                                                            |
+| `ClaudeCodeStore.chain(s)`                | Reads each transcript's `derived-from` entry back to the first segment. It follows every `claude_code_session` it names (any `via`), skips ids already in the chain, looks beside the current transcript first, then in every project.                                                                        |
+| `ClaudeCodeAdapter.read(s)`               | Streams the transcript line by line. It maps every entry by the [mapping table](#claude-code-entry--atif), pairs each `tool_use` with its `tool_result` by id, and reads `<id>/subagents/agent-*.jsonl` plus `.meta.json` into `subagent_trajectories`.                                                       |
+| `CodexStore.threads({ since })`           | Walks `sessions/` and `archived_sessions/` (`.jsonl`, `.jsonl.zst`), reads each rollout's first line (`session_meta`, decompressing only that far) and groups a subagent thread under its parent with meticulous's rule: the meta's `session_id` when it differs from the thread id, else `parent_thread_id`. |
+| `CodexAdapter.read(t)`                    | Decodes `.zst` with `node:zlib` `zstdDecompressSync`, then calls meticulous's `convertCodexSession`, and writes `schema_version: ATIF-v1.8`.                                                                                                                                                                  |
 
 Speed, measured on this Mac on 2026-11-27 (a measurement, not a test: the
 repo's `no-wall-clock-bound` rule forbids timing bounds in tests):

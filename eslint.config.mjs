@@ -8,6 +8,7 @@ import { defineConfig } from 'eslint/config';
 const typescript = ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'];
 const source = [...typescript, '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'];
 const reactClock = 'packages/react/{genai,input}/src/**/*.{ts,tsx}';
+const trajectorySource = 'packages/trajectory/src/**/*.ts';
 const tests = ['**/*.{test,spec}.{ts,tsx,cts,mts,js,jsx,cjs,mjs}'];
 
 export default defineConfig(
@@ -193,6 +194,45 @@ export default defineConfig(
     plugins: { island },
     settings: { island: { libraries: [reactClock] } },
     rules: { 'island/no-ambient-time': 'error' },
+  },
+  // @deepagents/trajectory reads only what its caller gives it: the store's
+  // root and the `since` date (its ADR 0005). It never finds a store in the
+  // home folder or the environment, and never reads the clock.
+  {
+    basePath: import.meta.dirname,
+    files: [trajectorySource],
+    ignores: tests,
+    plugins: { island },
+    settings: { island: { libraries: [trajectorySource] } },
+    rules: {
+      'island/no-ambient-time': 'error',
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'process',
+          property: 'env',
+          message:
+            '@deepagents/trajectory takes its store root from the caller (ADR 0005).',
+        },
+        {
+          object: 'os',
+          property: 'homedir',
+          message:
+            '@deepagents/trajectory takes its store root from the caller (ADR 0005).',
+        },
+      ],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['node:os', 'os'].map((name) => ({
+            name,
+            importNames: ['homedir'],
+            message:
+              '@deepagents/trajectory takes its store root from the caller (ADR 0005).',
+          })),
+        },
+      ],
+    },
   },
   // A Zukhruf app is loaded by import, so only this check keeps its layout:
   // one define* call per file, as the file's default export. A test builds
