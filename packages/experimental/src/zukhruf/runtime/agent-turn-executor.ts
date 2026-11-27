@@ -379,7 +379,7 @@ export class AgentTurnExecutor {
     // aborts `signal` (the queue's local abort), so `signal` cannot tell a
     // cancel from a worker shutdown.
     if (abort.signal.aborted) {
-      await recordTurnAborted(engine);
+      await this.#recordAborted(turn, engine);
     }
     if (
       turn.kind === 'recovery' ||
@@ -481,11 +481,7 @@ export class AgentTurnExecutor {
 
   /**
    * Records a turn interrupted before it sampled as Codex does: its input
-   * (`core/src/tasks/admission.rs`), then each call it aborted with an
-   * output right after the call (`core/src/context_manager/normalize.rs`),
-   * here a continuation's answered approvals settled as failed, then the
-   * `<turn_aborted>` marker. The approvals settle only while their message
-   * is the head, so they go before the marker.
+   * (`core/src/tasks/admission.rs`), then what `#recordAborted` records.
    */
   async #recordInterrupted(
     turn: TurnRef,
@@ -493,6 +489,17 @@ export class AgentTurnExecutor {
     communications: InterAgentCommunication[],
   ): Promise<void> {
     await this.#recordInput(turn, engine, communications, []);
+    await this.#recordAborted(turn, engine);
+  }
+
+  /**
+   * Ends a cancelled turn's chain as Codex does: each call it aborted gets an
+   * output right after the call (`core/src/context_manager/normalize.rs`),
+   * here a continuation's answered approvals that never ran settled as
+   * failed, then the `<turn_aborted>` marker. The approvals settle only while
+   * their message is the head, so they go before the marker.
+   */
+  async #recordAborted(turn: TurnRef, engine: ContextEngine): Promise<void> {
     await this.#approvals.settleFailedApprovals(
       turn,
       turn.streamId,
