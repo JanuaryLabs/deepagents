@@ -1,4 +1,4 @@
-import type { UIMessage, UIMessageChunk } from 'ai';
+import { APICallError, type UIMessage, type UIMessageChunk } from 'ai';
 import { expect, it, vi } from 'vitest';
 
 import {
@@ -378,28 +378,30 @@ it('rejects a semantically invalid upload receipt', async () => {
   ).rejects.toThrow('invalid upload response');
 });
 
-it('surfaces the server error for a rejected upload', async () => {
+it("rejects a refused upload with the AI SDK's APICallError, carrying the status and the server's body", async () => {
+  const body = {
+    error: 'Unsupported Media Type',
+    cause: {
+      code: 'zukhruf/unsupported-media-type',
+      detail: 'Uploads must be one of image/png, image/jpeg',
+    },
+  };
   const transport = new ZukhrufChatTransport({
     api,
-    fetch: async () =>
-      Response.json(
-        {
-          error: 'Unsupported Media Type',
-          cause: {
-            code: 'zukhruf/unsupported-media-type',
-            detail: 'Uploads must be one of image/png, image/jpeg',
-          },
-        },
-        { status: 415 },
-      ),
+    fetch: async () => Response.json(body, { status: 415 }),
   });
 
-  await expect(
-    transport.uploadFile(
+  const error = await transport
+    .uploadFile(
       sessionId,
       new File(['note'], 'notes.txt', { type: 'text/plain' }),
-    ),
-  ).rejects.toThrow(
-    'Uploading notes.txt failed with HTTP 415: zukhruf/unsupported-media-type — Uploads must be one of image/png, image/jpeg',
-  );
+    )
+    .catch((rejection: unknown) => rejection);
+
+  expect(APICallError.isInstance(error)).toBe(true);
+  expect(error).toMatchObject({
+    statusCode: 415,
+    url: `${api}/${sessionId}/uploads`,
+    responseBody: JSON.stringify(body),
+  });
 });

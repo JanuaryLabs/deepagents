@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PersistedPromptText } from '@deepagents/react-input/browser';
 
+const skillIcon = <svg aria-hidden data-icon="host-skill" />;
+
 describe('PersistedPromptText', () => {
   it('renders only the supported prompt markup', () => {
     using stack = new DisposableStack();
@@ -10,6 +12,7 @@ describe('PersistedPromptText', () => {
 
     const { container } = render(
       <PersistedPromptText
+        skillIcon={skillIcon}
         text={`Use \`sum()\` and [$report](skill://report) with [docs](https://example.com), [unsafe](javascript:alert(1)), $review, and $[data set].
 \`\`\`sql
 select 1
@@ -42,7 +45,9 @@ select 1
 
     const source =
       'Use [$report](skill://report), $review, and `sum()` for this.';
-    const { container } = render(<PersistedPromptText text={source} />);
+    const { container } = render(
+      <PersistedPromptText skillIcon={skillIcon} text={source} />,
+    );
     const root = container.firstElementChild;
     if (!root) throw new Error('Expected prompt root');
 
@@ -57,5 +62,32 @@ select 1
     fireEvent.copy(root, { clipboardData: { setData } });
 
     expect(setData).toHaveBeenCalledWith('text/plain', source);
+  });
+
+  it('draws the host icon beside each skill reference', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const { container } = render(
+      <PersistedPromptText
+        skillIcon={skillIcon}
+        text="Use [$report](skill://report) and $review now"
+      />,
+    );
+
+    expect(
+      Array.from(
+        container.querySelectorAll('[data-persisted-source]'),
+        (reference) => [
+          reference.textContent,
+          Array.from(reference.querySelectorAll('svg'), (icon) =>
+            icon.getAttribute('data-icon'),
+          ),
+        ],
+      ),
+    ).toEqual([
+      ['report', ['host-skill']],
+      ['review', ['host-skill']],
+    ]);
   });
 });

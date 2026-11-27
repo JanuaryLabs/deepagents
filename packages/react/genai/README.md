@@ -110,7 +110,7 @@ Providers nest. An inner provider changes only the keys it gives, the `markdown`
 </GenaiMessagesProvider>
 ```
 
-The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, ship no words of their own: `ChatComposer` fills them from the same catalog.
+The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, ship no words of their own: `ChatComposer` fills them from the same catalog. An attachment is named by `composer.attachment({ media, number })` in its preview and in `composer.removeAttachment({ label })`; the `[Image #N]` placeholder in the prompt keeps its English words, because the model reads it. When a submission fails, the alert shows `composer.uploadTooLarge` for an upload refused with 413, `composer.uploadUnsupported` for 415, `composer.uploadFailed` for any other refused upload, and `composer.sendFailed` for anything else; the server's own detail never reaches the page.
 
 ## Scrolling
 
@@ -147,7 +147,7 @@ writePrefill({ prompt, targetChatId: chatId, uploads });
 navigate(`/chats/${chatId}`);
 ```
 
-If an upload fails, nothing is written. Show the error on the entry page and keep the user there.
+If an upload fails, nothing is written. Show the error on the entry page and keep the user there. A refused upload rejects with the AI SDK's `APICallError`, as a refused send does: `statusCode` is the server's status and `responseBody` its text, so map the status to your words rather than showing `message`.
 
 ## One copy of @zukhruf/ui
 

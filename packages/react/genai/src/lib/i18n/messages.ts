@@ -1,6 +1,8 @@
 import type { ToolUIPart } from 'ai';
 import type { StreamdownTranslations } from 'streamdown';
 
+import type { ComposerAttachmentLabel } from '@deepagents/react-input/browser';
+
 export type PluralForms = Partial<
   Record<Exclude<Intl.LDMLPluralRule, 'other'>, string>
 > & { other: string };
@@ -46,11 +48,19 @@ export type GenaiMessages = {
   'composer.stop': string;
   'composer.editor': string;
   'composer.placeholder': string;
-  /** Shown when the host's submit rejects with something other than an `Error`. */
+  /** Shown when the host's submit rejects with anything but a failed upload. */
   'composer.sendFailed': string;
+  /** An upload the server refused with 413. */
+  'composer.uploadTooLarge': string;
+  /** An upload the server refused with 415. */
+  'composer.uploadUnsupported': string;
+  /** An upload the server refused with any other status. */
+  'composer.uploadFailed': string;
   'composer.attachments': string;
-  /** `placeholder` is the attachment's token in the prompt, such as `[Image #1]`. */
-  'composer.removeAttachment': Message<{ placeholder: string }>;
+  /** Names the `number`th attachment of its kind to the user, in its preview and its remove button. */
+  'composer.attachment': Message<Parameters<ComposerAttachmentLabel>[0]>;
+  /** `label` is what `composer.attachment` named the attachment. */
+  'composer.removeAttachment': Message<{ label: string }>;
   /** The hidden file input behind the attach button. */
   'composer.attachInput': string;
   'composer.suggestions': string;
@@ -170,8 +180,13 @@ export const en: GenaiMessages = {
   'composer.editor': 'Rich prompt composer',
   'composer.placeholder': 'Type a message or / for commands',
   'composer.sendFailed': 'Could not send prompt',
+  'composer.uploadTooLarge': 'The file is too large to upload.',
+  'composer.uploadUnsupported': 'This type of file cannot be uploaded.',
+  'composer.uploadFailed': 'Could not upload the file. Try again.',
   'composer.attachments': 'Attached files',
-  'composer.removeAttachment': ({ placeholder }) => `Remove ${placeholder}`,
+  'composer.attachment': ({ media, number }) =>
+    `[${{ image: 'Image', video: 'Video', audio: 'Audio' }[media]} #${number}]`,
+  'composer.removeAttachment': ({ label }) => `Remove ${label}`,
   'composer.attachInput': 'Attach media files',
   'composer.suggestions': 'Suggestions',
   'composer.noMatches': 'no matches',

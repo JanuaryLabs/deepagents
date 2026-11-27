@@ -198,6 +198,11 @@ describe('CompactMessages.UserBubble', () => {
     expect(skill).toHaveAttribute('data-skill-id', 'skill-123');
     expect(skill).toHaveAttribute('title', 'skill://skill-123');
     expect(skill?.className).not.toContain('bg-');
+    expect(
+      Array.from(skill?.querySelectorAll('svg') ?? [], (icon) =>
+        icon.getAttribute('class'),
+      ),
+    ).toEqual(['lucide lucide-package size-3.5 self-center']);
     expect(screen.queryByText(/skill:\/\//)).not.toBeInTheDocument();
   });
 

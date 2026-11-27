@@ -1,6 +1,7 @@
 import { AttachmentGroup, AttachmentMedia } from '@zukhruf/shadcn';
 import type { UIMessage } from 'ai';
 import { cn } from 'cn';
+import { PackageIcon } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
 
 import {
@@ -248,7 +249,15 @@ export function UserMessageContent({
               dir="auto"
               className="text-sm whitespace-pre-wrap"
             >
-              <PersistedPromptText text={part.text} />
+              <PersistedPromptText
+                text={part.text}
+                skillIcon={
+                  <PackageIcon
+                    aria-hidden="true"
+                    className="size-3.5 self-center"
+                  />
+                }
+              />
             </div>
           ) : null,
         )}

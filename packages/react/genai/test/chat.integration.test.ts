@@ -1,4 +1,5 @@
 import {
+  APICallError,
   DefaultChatTransport,
   type UIMessage,
   type UIMessageChunk,
@@ -579,7 +580,10 @@ test('a failed upload rejects its submission without blocking a following text s
     });
     const rejected = assert.rejects(
       image,
-      /Uploading shot.png failed with HTTP 503/,
+      (error) =>
+        APICallError.isInstance(error) &&
+        error.statusCode === 503 &&
+        error.responseBody === 'Service Unavailable',
     );
     const text = view.controls.submit({
       prompt: 'text survives',
@@ -587,7 +591,7 @@ test('a failed upload rejects its submission without blocking a following text s
     });
 
     await act(async () => {
-      upload.resolve(new Response(null, { status: 503 }));
+      upload.resolve(new Response('Service Unavailable', { status: 503 }));
       await Promise.all([rejected, text]);
     });
 

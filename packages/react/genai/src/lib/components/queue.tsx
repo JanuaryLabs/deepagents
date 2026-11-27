@@ -1,5 +1,5 @@
 import { cn } from 'cn';
-import { ListPlus, Trash2 } from 'lucide-react';
+import { ListPlus, PackageIcon, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { PersistedPromptText } from '@deepagents/react-input/browser';
@@ -57,7 +57,12 @@ function MessageQueueText({
   return (
     <span className={cn('min-w-0 flex-1 truncate text-sm', className)}>
       {typeof children === 'string' ? (
-        <PersistedPromptText text={children} />
+        <PersistedPromptText
+          text={children}
+          skillIcon={
+            <PackageIcon aria-hidden="true" className="size-3.5 self-center" />
+          }
+        />
       ) : (
         children
       )}

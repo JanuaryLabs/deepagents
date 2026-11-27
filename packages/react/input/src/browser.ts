@@ -73,6 +73,7 @@ export type { ComposerPreparedPayload } from './lib/ComposerCore.ts';
 export { isVisibleInPhase } from './lib/ComposerVisibility.ts';
 export type {
   ActivePopup,
+  ComposerAttachmentLabel,
   ComposerDropTransfer,
   ComposerVisibility,
   ComposerSubmissionItem,

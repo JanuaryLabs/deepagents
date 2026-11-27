@@ -120,6 +120,12 @@ export type ComposerSuggestion = ComposerItemEntry;
 /** Top-level media type of an attached file; it names the `[Image #N]`, `[Video #N]`, or `[Audio #N]` placeholder. */
 export type ComposerAttachmentMedia = 'image' | 'video' | 'audio';
 
+/** Names an attachment to the user, such as in a remove button's label; the `[Image #N]` placeholder the model reads keeps its own words. */
+export type ComposerAttachmentLabel = (attachment: {
+  media: ComposerAttachmentMedia;
+  number: number;
+}) => string;
+
 /** A media type the Composer attaches: an exact type such as `image/png`, or a whole family such as `image/*`. */
 export type ComposerMediaType = `${ComposerAttachmentMedia}/${string}`;
 

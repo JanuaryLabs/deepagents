@@ -36,6 +36,7 @@ import {
   expandedTextLimitMessage,
   footerWords,
   popupWords,
+  remoteImagesWords,
   rootWords,
   shortcutsWords,
 } from '../testing/english-words.ts';
@@ -343,7 +344,7 @@ function RichInputScenario({
             <Composer.Submit>Submit prompt</Composer.Submit>
             <Composer.Reset>Reset rich prompt</Composer.Reset>
           </Composer.Toolbar>
-          <Composer.RemoteImages />
+          <Composer.RemoteImages {...remoteImagesWords} />
           <Composer.Attachments {...attachmentsWords} />
           <Composer.Editor {...editorWords} />
           <Composer.Error />
@@ -816,7 +817,19 @@ describe('Composer words from the host', () => {
     placeholder: 'Écrivez ici',
     submitFailedMessage: 'Envoi impossible',
     attachments: 'Pièces jointes',
-    removeAttachment: (placeholder: string) => `Retirer ${placeholder}`,
+    attachmentLabel: ({
+      media,
+      number,
+    }: {
+      media: 'image' | 'video' | 'audio';
+      number: number;
+    }) =>
+      `${{ image: 'Image', video: 'Vidéo', audio: 'Son' }[media]} ${number}`,
+    removeAttachment: (label: string) => `Retirer ${label}`,
+    submitError: (error: Error) =>
+      'status' in error && error.status === 413
+        ? 'Fichier trop lourd'
+        : 'Envoi impossible',
     attachInput: 'Joindre des médias',
     suggestions: 'Propositions',
     noMatches: 'Aucun résultat',
@@ -848,6 +861,7 @@ describe('Composer words from the host', () => {
       <Composer.Root
         editorAriaLabel={words.editorAriaLabel}
         submitFailedMessage={words.submitFailedMessage}
+        submitErrorMessage={words.submitError}
         unsupportedFileMessage={words.unsupportedFile}
         unknownCommandMessage={words.unknownCommand}
         missingAttachmentMessage={words.missingAttachment}
@@ -870,9 +884,17 @@ describe('Composer words from the host', () => {
             <Composer.AttachFiles inputLabel={words.attachInput}>
               Browse
             </Composer.AttachFiles>
+            <Composer.AddRemoteImage url={REMOTE_IMAGE_URL}>
+              Add remote image
+            </Composer.AddRemoteImage>
           </Composer.Toolbar>
+          <Composer.RemoteImages
+            data-testid="remote-images"
+            attachmentLabel={words.attachmentLabel}
+          />
           <Composer.Attachments
             aria-label={words.attachments}
+            attachmentLabel={words.attachmentLabel}
             removeLabel={words.removeAttachment}
             removeIcon={<svg aria-hidden data-icon="host-remove" />}
           />
@@ -903,8 +925,7 @@ describe('Composer words from the host', () => {
       placeholder: prompt.getAttribute('aria-placeholder'),
       list: (await screen.findByRole('list', { name: words.attachments }))
         .tagName,
-      remove: screen.getAllByRole('button', { name: 'Retirer [Image #1]' })
-        .length,
+      remove: screen.getAllByRole('button', { name: 'Retirer Image 1' }).length,
     }).toEqual({ placeholder: words.placeholder, list: 'DIV', remove: 1 });
   });
 
@@ -975,7 +996,7 @@ describe('Composer words from the host', () => {
       new File(['png'], 'chart.png', { type: 'image/png' }),
     );
     const remove = await screen.findByRole('button', {
-      name: 'Retirer [Image #1]',
+      name: 'Retirer Image 1',
     });
 
     expect(
@@ -983,6 +1004,68 @@ describe('Composer words from the host', () => {
         icon.getAttribute('data-icon'),
       ),
     ).toEqual(['host-remove']);
+  });
+
+  it('names each attachment in the host words: the remote-image row, each preview and each remove button', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(<WordsScenario />, { wrapper: FakeClock });
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Add remote image' }),
+    );
+    await user.upload(await screen.findByLabelText(words.attachInput), [
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+      new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
+      new File(['track'], '', { type: 'audio/mpeg' }),
+    ]);
+    const list = await screen.findByRole('list', { name: words.attachments });
+    await within(list).findByRole('img', { name: 'Image 2' });
+
+    expect({
+      remoteRow: screen.getByTestId('remote-images').textContent,
+      previews: within(list)
+        .getAllByRole('img')
+        .map(
+          (preview) =>
+            preview.getAttribute('alt') ?? preview.getAttribute('aria-label'),
+        ),
+      unnamedChip: within(list).getByRole('img', { name: 'Son 4' }).textContent,
+      remove: within(list)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    }).toEqual({
+      remoteRow: `Image 1${REMOTE_IMAGE_URL}`,
+      previews: ['Image 2', 'Vidéo 3', 'Son 4'],
+      unnamedChip: '♪ Son 4audio/mpeg',
+      remove: ['Retirer Image 2', 'Retirer Vidéo 3', 'Retirer Son 4'],
+    });
+  });
+
+  it('says in the host words why a send failed when the rejection is an Error, given that error', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const tooLarge = Object.assign(
+      new Error('Uploading chart.png failed with HTTP 413'),
+      { status: 413 },
+    );
+    const user = userEvent.setup();
+    render(<WordsScenario onSubmit={() => Promise.reject(tooLarge)} />, {
+      wrapper: FakeClock,
+    });
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    await user.click(prompt);
+    await user.keyboard('hello{Enter}');
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Fichier trop lourd',
+    );
   });
 
   it('says in the host words why a file was refused, with its name and without one', async () => {
@@ -1051,7 +1134,7 @@ describe('Composer words from the host', () => {
     // ProseMirror groups edits less than 500 ms apart into one undo step.
     await new Promise((resolve) => setTimeout(resolve, 600));
     await user.click(
-      await screen.findByRole('button', { name: 'Retirer [Image #1]' }),
+      await screen.findByRole('button', { name: 'Retirer Image 1' }),
     );
     await user.click(prompt);
     await user.keyboard('{Control>}z{/Control}{Enter}');

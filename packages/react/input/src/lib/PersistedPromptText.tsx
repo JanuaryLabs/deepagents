@@ -1,4 +1,3 @@
-import { Package } from 'lucide-react';
 import type { ClipboardEvent, ReactNode } from 'react';
 
 import {
@@ -7,14 +6,26 @@ import {
 } from '../persisted-prompt.ts';
 import { reconstructPersistedPromptSelection } from './persisted-prompt-selection.ts';
 
-export function PersistedPromptText({ text }: { text: string }) {
+export function PersistedPromptText({
+  text,
+  skillIcon,
+}: {
+  text: string;
+  /** Drawn before each skill reference's name. */
+  skillIcon: ReactNode;
+}) {
   const tokens = tokenizePersistedPrompt(text);
   return (
-    <span onCopy={copyPersistedSelection}>{tokens.map(renderPromptToken)}</span>
+    <span onCopy={copyPersistedSelection}>
+      {tokens.map((token) => renderPromptToken(token, skillIcon))}
+    </span>
   );
 }
 
-function renderPromptToken(token: PersistedPromptToken): ReactNode {
+function renderPromptToken(
+  token: PersistedPromptToken,
+  skillIcon: ReactNode,
+): ReactNode {
   switch (token.kind) {
     case 'text':
       return token.value;
@@ -46,6 +57,7 @@ function renderPromptToken(token: PersistedPromptToken): ReactNode {
           source={token.source}
           skillId={token.skillId}
           title={token.href}
+          icon={skillIcon}
         />
       );
     case 'standalone-skill':
@@ -54,6 +66,7 @@ function renderPromptToken(token: PersistedPromptToken): ReactNode {
           key={token.start}
           name={token.name}
           source={token.source}
+          icon={skillIcon}
         />
       );
     case 'mention':
@@ -90,11 +103,13 @@ function SkillReference({
   source,
   skillId,
   title,
+  icon,
 }: {
   name: string;
   source: string;
   skillId?: string;
   title?: string;
+  icon: ReactNode;
 }) {
   return (
     <span
@@ -104,7 +119,7 @@ function SkillReference({
       title={title}
       className="text-primary inline-flex items-baseline gap-1"
     >
-      <Package aria-hidden="true" className="size-3.5 self-center" />
+      {icon}
       <span>{name}</span>
     </span>
   );

@@ -55,6 +55,7 @@ import { popupSuggestionMatches } from './ComposerSuggestions.ts';
 import { itemToken } from './ComposerTriggers.ts';
 import type {
   ActivePopup,
+  ComposerAttachmentLabel,
   ComposerDraftSource,
   ComposerDropTransfer,
   ComposerInitialDraft,
@@ -119,6 +120,8 @@ export type ComposerRootProps = {
   editorAriaLabel: string;
   /** Shown when `onSubmit` rejects with something other than an `Error`. */
   submitFailedMessage: string;
+  /** Shown when `onSubmit` rejects with an `Error`, such as a failed upload; the host maps it to its words. */
+  submitErrorMessage: (error: Error) => string;
   /**
    * The media types the file picker offers and that a picked, pasted or dropped file must have.
    * Without it, any image, video or audio file is attached and any other pasted or dropped file
@@ -153,7 +156,10 @@ export type ComposerContentProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerToolbarProps = ComponentPropsWithoutRef<'div'>;
 
-export type ComposerRemoteImagesProps = ComponentPropsWithoutRef<'div'>;
+export type ComposerRemoteImagesProps = ComponentPropsWithoutRef<'div'> & {
+  /** Names each remote image in its row. */
+  attachmentLabel: ComposerAttachmentLabel;
+};
 
 export type ComposerEditorProps = ComponentPropsWithoutRef<'div'> & {
   placeholder: string;
@@ -271,6 +277,7 @@ function ComposerRootInner({
   expandedTextLimit,
   editorAriaLabel,
   submitFailedMessage,
+  submitErrorMessage,
   acceptedMediaTypes,
   unsupportedFileMessage,
   unknownCommandMessage,
@@ -1266,7 +1273,9 @@ function ComposerRootInner({
             setComposer((state) => ({
               ...state,
               error:
-                error instanceof Error ? error.message : submitFailedMessage,
+                error instanceof Error
+                  ? submitErrorMessage(error)
+                  : submitFailedMessage,
             }));
           }
         })
@@ -1889,6 +1898,7 @@ function ComposerToolbar({ className, ...props }: ComposerToolbarProps) {
 
 function ComposerRemoteImages({
   className,
+  attachmentLabel,
   ...props
 }: ComposerRemoteImagesProps) {
   const { state } = useComposerContext('Composer.RemoteImages');
@@ -1910,7 +1920,9 @@ function ComposerRemoteImages({
               selected ? 'bg-primary text-primary-foreground' : 'text-sky-500',
             )}
           >
-            <span className="shrink-0">[Image #{index + 1}]</span>
+            <span className="shrink-0">
+              {attachmentLabel({ media: 'image', number: index + 1 })}
+            </span>
             <span className="truncate text-xs opacity-70">{image.url}</span>
           </div>
         );

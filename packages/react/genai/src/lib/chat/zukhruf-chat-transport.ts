@@ -1,4 +1,4 @@
-import { DefaultChatTransport, type UIMessage } from 'ai';
+import { APICallError, DefaultChatTransport, type UIMessage } from 'ai';
 import { z } from 'zod';
 
 import { type ElementDescriptor, toDescriptor } from '@deepagents/elements';
@@ -116,22 +116,28 @@ export class ZukhrufChatTransport extends DefaultChatTransport<UIMessage> {
 
   /**
    * Store an image under the session and return its receipt. The session does
-   * not need to exist yet.
+   * not need to exist yet. A refused upload throws the AI SDK's `APICallError`
+   * with the response's status and text, as a refused send does.
    */
   async uploadFile(sessionId: string, file: File) {
-    const response = await this.request(
-      `${sessionApi(this.sessionsApi, sessionId)}/uploads`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': file.type,
-          [UPLOAD_FILENAME_HEADER]: encodeURIComponent(file.name),
-        },
-        body: file,
+    const url = `${sessionApi(this.sessionsApi, sessionId)}/uploads`;
+    const response = await this.request(url, {
+      method: 'POST',
+      headers: {
+        'content-type': file.type,
+        [UPLOAD_FILENAME_HEADER]: encodeURIComponent(file.name),
       },
-    );
+      body: file,
+    });
     if (!response.ok) {
-      throw new Error(await describeUploadFailure(response, file));
+      const responseBody = await response.text();
+      throw new APICallError({
+        message: responseBody || 'Failed to upload the file.',
+        url,
+        requestBodyValues: undefined,
+        statusCode: response.status,
+        responseBody,
+      });
     }
     const receipt = uploadReceiptSchema.safeParse(await response.json());
     if (!receipt.success) {
@@ -143,40 +149,6 @@ export class ZukhrufChatTransport extends DefaultChatTransport<UIMessage> {
 
 function sessionApi(sessionsApi: string, sessionId: string) {
   return `${sessionsApi}/${encodeURIComponent(sessionId)}`;
-}
-
-async function describeUploadFailure(
-  response: Response,
-  file: File,
-): Promise<string> {
-  const summary = `Uploading ${file.name} failed with HTTP ${response.status}`;
-  const body: unknown = await response.json().catch((error: unknown) => {
-    // A body that is not JSON gets the status summary alone.
-    if (error instanceof SyntaxError) return null;
-    throw error;
-  });
-  const reason = failureReason(body);
-  return reason ? `${summary}: ${reason}` : summary;
-}
-
-function failureReason(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const cause =
-    'cause' in body && typeof body.cause === 'object' && body.cause !== null
-      ? body.cause
-      : null;
-  const code =
-    cause && 'code' in cause && typeof cause.code === 'string'
-      ? cause.code
-      : null;
-  const detail =
-    cause && 'detail' in cause && typeof cause.detail === 'string'
-      ? cause.detail
-      : 'error' in body && typeof body.error === 'string'
-        ? body.error
-        : null;
-  const reason = [code, detail].filter((part) => part !== null).join(' — ');
-  return reason || null;
 }
 
 function trimTrailingSlash(value: string) {

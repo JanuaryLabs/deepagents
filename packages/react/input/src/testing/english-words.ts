@@ -7,10 +7,12 @@ import type {
   ComposerShortcutsProps,
 } from '../lib/Composer.tsx';
 import type { ComposerAttachmentsProps } from '../lib/ComposerAttachments.tsx';
+import type { ComposerAttachmentMedia } from '../lib/ComposerTypes.ts';
 
 export const rootWords = {
   editorAriaLabel: 'Rich prompt composer',
   submitFailedMessage: 'Could not send prompt',
+  submitErrorMessage: (error) => error.message,
   unsupportedFileMessage: ({ name }) =>
     `Only image, video, or audio files can be attached: ${name ?? 'unnamed file'}`,
   unknownCommandMessage: ({ name }) => `Unrecognized command: /${name}`,
@@ -33,9 +35,26 @@ export const popupWords = {
   argsLabel: 'args',
 } satisfies ComposerPopupProps;
 
+const mediaNames: Record<ComposerAttachmentMedia, string> = {
+  image: 'Image',
+  video: 'Video',
+  audio: 'Audio',
+};
+
+export const attachmentLabel = ({
+  media,
+  number,
+}: {
+  media: ComposerAttachmentMedia;
+  number: number;
+}) => `[${mediaNames[media]} #${number}]`;
+
+export const remoteImagesWords = { attachmentLabel };
+
 export const attachmentsWords = {
   'aria-label': 'Attached files',
-  removeLabel: (placeholder) => `Remove ${placeholder}`,
+  attachmentLabel,
+  removeLabel: (label) => `Remove ${label}`,
   removeIcon: createElement('svg', { 'aria-hidden': true }),
 } satisfies ComposerAttachmentsProps;
 

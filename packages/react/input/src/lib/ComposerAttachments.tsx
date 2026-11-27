@@ -8,23 +8,30 @@ import {
 } from 'react';
 
 import { useComposerContext } from './ComposerContext.ts';
-import type { ComposerState } from './ComposerTypes.ts';
+import { attachmentNumber } from './ComposerCore.ts';
+import type {
+  ComposerAttachmentLabel,
+  ComposerState,
+} from './ComposerTypes.ts';
 
 export type ComposerAttachmentsProps = ComponentPropsWithoutRef<'div'> & {
   'aria-label': string;
-  /** Names the button that removes the attachment shown as `placeholder`. */
-  removeLabel: (placeholder: string) => string;
+  /** Names each attachment's preview, and is given to `removeLabel`. */
+  attachmentLabel: ComposerAttachmentLabel;
+  /** Names the button that removes the attachment that `attachmentLabel` named `label`. */
+  removeLabel: (label: string) => string;
   /** Drawn inside each remove button. */
   removeIcon: ReactNode;
 };
 
 type AttachmentPreviewProps = {
-  placeholder: string;
+  label: string;
   file: File;
 };
 
 export function ComposerAttachments({
   className,
+  attachmentLabel,
   removeLabel,
   removeIcon,
   ...props
@@ -46,6 +53,7 @@ export function ComposerAttachments({
         <ComposerAttachment
           key={attachment.id}
           attachment={attachment}
+          attachmentLabel={attachmentLabel}
           removeLabel={removeLabel}
           removeIcon={removeIcon}
         />
@@ -56,11 +64,15 @@ export function ComposerAttachments({
 
 function ComposerAttachment({
   attachment: { id, placeholder, media },
+  attachmentLabel,
   removeLabel,
   removeIcon,
 }: {
   attachment: ComposerState['imageAttachments'][number];
-} & Pick<ComposerAttachmentsProps, 'removeLabel' | 'removeIcon'>) {
+} & Pick<
+  ComposerAttachmentsProps,
+  'attachmentLabel' | 'removeLabel' | 'removeIcon'
+>) {
   const { attachedImages, disabled, actions } = useComposerContext(
     'Composer.Attachments',
   );
@@ -68,22 +80,22 @@ function ComposerAttachment({
   if (!file) {
     return null;
   }
+  const label = attachmentLabel({
+    media,
+    number: attachmentNumber(placeholder),
+  });
   return (
     <div role="listitem" className="relative">
       {media === 'video' ? (
-        <ComposerAttachedVideoTile placeholder={placeholder} file={file} />
+        <ComposerAttachedVideoTile label={label} file={file} />
       ) : media === 'audio' ? (
-        <ComposerAttachedFileChip
-          placeholder={placeholder}
-          file={file}
-          glyph="♪"
-        />
+        <ComposerAttachedFileChip label={label} file={file} glyph="♪" />
       ) : (
-        <ComposerImagePreview placeholder={placeholder} file={file} />
+        <ComposerImagePreview label={label} file={file} />
       )}
       <Button
         type="button"
-        aria-label={removeLabel(placeholder)}
+        aria-label={removeLabel(label)}
         disabled={disabled}
         onClick={() => actions.removeImageAttachment(id)}
         className="bg-background text-foreground border-border hover:bg-muted absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border disabled:opacity-50"
@@ -104,15 +116,15 @@ function useObjectUrl(file: File) {
   return objectUrl;
 }
 
-function ComposerImagePreview({ placeholder, file }: AttachmentPreviewProps) {
+function ComposerImagePreview({ label, file }: AttachmentPreviewProps) {
   const objectUrl = useObjectUrl(file);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   return objectUrl === null ? null : objectUrl === failedUrl ? (
-    <ComposerAttachedFileChip placeholder={placeholder} file={file} glyph="🖼" />
+    <ComposerAttachedFileChip label={label} file={file} glyph="🖼" />
   ) : (
     <img
       src={objectUrl}
-      alt={placeholder}
+      alt={label}
       title={file.name}
       className="border-border size-16 rounded-md border object-cover"
       onError={() => setFailedUrl(objectUrl)}
@@ -120,16 +132,13 @@ function ComposerImagePreview({ placeholder, file }: AttachmentPreviewProps) {
   );
 }
 
-function ComposerAttachedVideoTile({
-  placeholder,
-  file,
-}: AttachmentPreviewProps) {
+function ComposerAttachedVideoTile({ label, file }: AttachmentPreviewProps) {
   const objectUrl = useObjectUrl(file);
   const [duration, setDuration] = useState<number | null>(null);
   return (
     <div
       role="img"
-      aria-label={placeholder}
+      aria-label={label}
       title={file.name}
       className="border-border bg-muted relative size-16 overflow-hidden rounded-md border"
     >
@@ -162,20 +171,20 @@ function formatDuration(seconds: number) {
 }
 
 function ComposerAttachedFileChip({
-  placeholder,
+  label,
   file,
   glyph,
 }: AttachmentPreviewProps & { glyph: string }) {
   return (
     <div
       role="img"
-      aria-label={placeholder}
+      aria-label={label}
       title={file.name}
       className="border-border bg-muted text-muted-foreground flex h-16 max-w-48 flex-col justify-center gap-0.5 rounded-md border px-2 text-xs"
     >
       <span className="text-foreground truncate">
         <span aria-hidden>{glyph} </span>
-        {file.name || placeholder}
+        {file.name || label}
       </span>
       <span className="truncate">{file.type}</span>
     </div>

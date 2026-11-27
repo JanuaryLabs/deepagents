@@ -1,3 +1,4 @@
+import { APICallError } from 'ai';
 import { cn } from 'cn';
 import {
   Loader2Icon,
@@ -40,6 +41,7 @@ function ChatComposerProvider({
   Omit<
     ComposerRootProps,
     | 'submitFailedMessage'
+    | 'submitErrorMessage'
     | 'unsupportedFileMessage'
     | 'unknownCommandMessage'
     | 'missingAttachmentMessage'
@@ -57,6 +59,7 @@ function ChatComposerProvider({
       hasInteracted={hasSubmitted}
       editorAriaLabel={t('composer.editor')}
       submitFailedMessage={t('composer.sendFailed')}
+      submitErrorMessage={(error) => submitFailure(error, t)}
       unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
       unknownCommandMessage={(command) => t('composer.unknownCommand', command)}
       missingAttachmentMessage={(attachment) =>
@@ -77,6 +80,19 @@ function ChatComposerProvider({
       {...props}
     />
   );
+}
+
+/** A refused upload is the AI SDK's `APICallError`; its server detail never reaches the page. */
+function submitFailure(error: Error, t: GenaiTranslate) {
+  if (!APICallError.isInstance(error)) return t('composer.sendFailed');
+  switch (error.statusCode) {
+    case 413:
+      return t('composer.uploadTooLarge');
+    case 415:
+      return t('composer.uploadUnsupported');
+    default:
+      return t('composer.uploadFailed');
+  }
 }
 
 function ChatComposerRoot({ className, ...props }: ComponentProps<'div'>) {
@@ -121,16 +137,18 @@ function ChatComposerAttachments({
   className,
   ...props
 }: InstanceWords<
-  Omit<ComposerAttachmentsProps, 'removeLabel' | 'removeIcon'>,
+  Omit<
+    ComposerAttachmentsProps,
+    'attachmentLabel' | 'removeLabel' | 'removeIcon'
+  >,
   'aria-label'
 >) {
   const t = useGenaiMessages();
   return (
     <Composer.Attachments
       aria-label={t('composer.attachments')}
-      removeLabel={(placeholder) =>
-        t('composer.removeAttachment', { placeholder })
-      }
+      attachmentLabel={(attachment) => t('composer.attachment', attachment)}
+      removeLabel={(label) => t('composer.removeAttachment', { label })}
       removeIcon={<XIcon aria-hidden className="size-3" />}
       className={cn('pb-1.5', className)}
       {...props}

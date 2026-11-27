@@ -726,6 +726,11 @@ export function attachmentPlaceholder(
   return `[${attachmentLabels[media]} #${number}]`;
 }
 
+/** The number in a placeholder that `attachmentPlaceholder` wrote. */
+export function attachmentNumber(placeholder: string): number {
+  return Number(placeholder.slice(placeholder.lastIndexOf('#') + 1, -1));
+}
+
 function renumberImageAttachments(
   images: ComposerState['imageAttachments'],
   remoteCount: number,

@@ -88,8 +88,13 @@ const ar: GenaiMessages = {
   'composer.editor': 'اكتب رسالتك',
   'composer.placeholder': 'اكتب رسالة أو / للأوامر',
   'composer.sendFailed': 'تعذّر إرسال الطلب',
+  'composer.uploadTooLarge': 'الملف أكبر من أن يُرفع.',
+  'composer.uploadUnsupported': 'لا يمكن رفع هذا النوع من الملفات.',
+  'composer.uploadFailed': 'تعذّر رفع الملف. حاول مجددًا.',
   'composer.attachments': 'الملفات المرفقة بالطلب',
-  'composer.removeAttachment': ({ placeholder }) => `أزل ${placeholder}`,
+  'composer.attachment': ({ media, number }, { format }) =>
+    `${{ image: 'الصورة', video: 'الفيديو', audio: 'المقطع الصوتي' }[media]} ${format(number)}`,
+  'composer.removeAttachment': ({ label }) => `أزل ${label}`,
   'composer.attachInput': 'أرفق ملفات وسائط',
   'composer.suggestions': 'الاقتراحات',
   'composer.noMatches': 'لا نتائج',
@@ -606,14 +611,15 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
 
     expect({
       placeholder: prompt.getAttribute('aria-placeholder'),
-      remove: screen.queryAllByRole('button', { name: 'أزل [Image #1]' })
-        .length,
+      remove: screen.queryAllByRole('button', { name: 'أزل الصورة 1' }).length,
+      preview: screen.queryAllByRole('img', { name: 'الصورة 1' }).length,
       suggestion,
       empty,
       failure: (await screen.findByRole('alert')).textContent,
     }).toEqual({
       placeholder: ar['composer.placeholder'],
       remove: 1,
+      preview: 1,
       suggestion: '/reviewمعاملاتReview the prompt',
       empty: ar['composer.noMatches'],
       failure: ar['composer.sendFailed'],
@@ -706,7 +712,7 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
       new File(['png'], 'chart.png', { type: 'image/png' }),
     );
     const remove = await screen.findByRole('button', {
-      name: 'أزل [Image #1]',
+      name: 'أزل الصورة 1',
     });
     const icons = Array.from(remove.querySelectorAll('svg'), (icon) =>
       icon.getAttribute('class'),
@@ -1231,7 +1237,13 @@ describe('without a GenaiMessagesProvider, beyond the step lines', () => {
         t('response.renderFailed', { error: 'boom' }),
         t('dictation.transcribing'),
         t('snapshot.copy'),
-        t('composer.removeAttachment', { placeholder: '[Image #1]' }),
+        t('composer.uploadTooLarge'),
+        t('composer.uploadUnsupported'),
+        t('composer.uploadFailed'),
+        t('composer.attachment', { media: 'image', number: 1 }),
+        t('composer.attachment', { media: 'video', number: 2 }),
+        t('composer.attachment', { media: 'audio', number: 3 }),
+        t('composer.removeAttachment', { label: '[Image #1]' }),
         t('composer.unsupportedFile', { name: 'report.csv' }),
         t('composer.unsupportedFile', { name: undefined }),
         t('composer.unknownCommand', { name: 'nope' }),
@@ -1255,6 +1267,12 @@ describe('without a GenaiMessagesProvider, beyond the step lines', () => {
       'Failed to render content: boom',
       'Transcribing…',
       'Copy snapshot',
+      'The file is too large to upload.',
+      'This type of file cannot be uploaded.',
+      'Could not upload the file. Try again.',
+      '[Image #1]',
+      '[Video #2]',
+      '[Audio #3]',
       'Remove [Image #1]',
       'Only image, video, or audio files can be attached: report.csv',
       'Only image, video, or audio files can be attached: unnamed file',
