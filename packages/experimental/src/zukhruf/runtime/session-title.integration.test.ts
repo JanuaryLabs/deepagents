@@ -1,11 +1,16 @@
 import { PGlite } from '@electric-sql/pglite';
+import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 
-import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
+import {
+  InMemoryContextStore,
+  SqliteContextStore,
+  SqliteStreamStore,
+} from '@deepagents/context';
 import {
   AgentRuntime,
   PgBossTurnQueue,
@@ -291,4 +296,55 @@ test('setSessionTitle stores the trimmed title, and refuses an empty title and a
     (await host.listHistory('owner')).map(({ title }) => title),
     ['Trip to Amman'],
   );
+});
+
+test('setSessionTitle rejects with the store failure itself when the store fails, not as a missing session', async () => {
+  const database = open(':memory:');
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'clerk',
+      model: answeringModel(),
+      sandbox: buildSandbox(),
+      instructions: [],
+    }),
+  );
+  await using host = await runtime.initialize(
+    defineStack(async (resources) => {
+      const boss = resources.adopt(
+        new PgBoss({
+          db: fromPglite(resources.use(new PGlite())),
+          backend: 'pglite',
+        }),
+        (boss) => boss.stop({ graceful: false }),
+      );
+      boss.on('error', (error) => {
+        throw error;
+      });
+      await boss.start();
+      return {
+        storage: new ControlledAgentStorage({
+          queue: await PgBossTurnQueue.create(boss, {
+            pollingIntervalSeconds: 0.5,
+            schema: 'pgboss',
+          }),
+          store: new SqliteContextStore(database),
+          streams: streamsFor(
+            resources.adopt(new SqliteStreamStore(':memory:'), (store) =>
+              store.close(),
+            ),
+          ),
+          mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+        }),
+      };
+    }),
+  );
+  await host.work();
+  const conversation = { chatId: 'renamed', userId: 'owner' };
+  const turn = await host.enqueue(conversation, userTurn('first', QUESTION));
+  await Array.fromAsync(turn.stream);
+  database.close();
+
+  await assert.rejects(host.setSessionTitle(conversation, 'Trip to Amman'), {
+    code: 'ERR_INVALID_STATE',
+  });
 });

@@ -6,6 +6,7 @@ import test from 'node:test';
 import { z } from 'zod';
 
 import {
+  ChatNotFoundError,
   ContextEngine,
   InMemoryContextStore,
   SqliteContextStore,
@@ -143,6 +144,7 @@ test('updating metadata of a missing chat throws', async () => {
     first.updateChat('no-such-chat', (chat) => ({
       metadata: chat.metadata,
     })),
-    /chat "no-such-chat" not found/,
+    (error) =>
+      error instanceof ChatNotFoundError && error.chatId === 'no-such-chat',
   );
 });

@@ -3,6 +3,7 @@ import type { Telemetry } from 'ai';
 
 import {
   type ChatInfo,
+  ChatNotFoundError,
   ContextEngine,
   type ContextStore,
   type StreamData,
@@ -957,18 +958,19 @@ class RuntimeHost implements AsyncDisposable {
   ): Promise<void> {
     const trimmed = title.trim();
     if (!trimmed) throw new EmptySessionTitleError(conversation.chatId);
-    // The store's updateChat rejects a missing chat with an untyped error.
-    if (!(await this.#store.getChat(conversation.chatId))) {
+    try {
+      await this.#store.updateChat(conversation.chatId, (chat) => {
+        assertConversationOwner(conversation, chat.userId);
+        const root = AgentThread.fromMetadata(conversation, chat.metadata);
+        if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
+          throw new ConversationNotFoundError(conversation.chatId);
+        }
+        return { title: trimmed };
+      });
+    } catch (error) {
+      if (!(error instanceof ChatNotFoundError)) throw error;
       throw new ConversationNotFoundError(conversation.chatId);
     }
-    await this.#store.updateChat(conversation.chatId, (chat) => {
-      assertConversationOwner(conversation, chat.userId);
-      const root = AgentThread.fromMetadata(conversation, chat.metadata);
-      if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
-        throw new ConversationNotFoundError(conversation.chatId);
-      }
-      return { title: trimmed };
-    });
   }
 
   /**

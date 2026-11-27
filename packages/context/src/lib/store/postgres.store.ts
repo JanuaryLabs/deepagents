@@ -25,7 +25,7 @@ import type {
   SearchResult,
   StoredChatData,
 } from './store.ts';
-import { ContextStore } from './store.ts';
+import { ChatNotFoundError, ContextStore } from './store.ts';
 
 // Row shapes as pg returns them for ddl.postgres.ts: unquoted identifiers fold
 // to lowercase, BIGINT and COUNT() arrive as strings (see bigintColumn), JSONB
@@ -298,7 +298,7 @@ export class PostgresContextStore extends ContextStore {
       );
       const current = storedChat.optional().parse(result.rows[0]);
       if (!current) {
-        throw new Error(`updateChat: chat "${chatId}" not found`);
+        throw new ChatNotFoundError(chatId);
       }
 
       const updates = update(current);

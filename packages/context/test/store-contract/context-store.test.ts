@@ -1,6 +1,8 @@
 import { describe, it } from '@zukhruf/parameterized-test';
 import assert from 'node:assert';
 
+import { ChatNotFoundError } from '@deepagents/context';
+
 import { storeCases } from './store-cases.ts';
 
 void describe.each(storeCases, (storeCase) =>
@@ -86,6 +88,21 @@ void describe.each(storeCases, (storeCase) =>
           assert.ok(
             updated.updatedAt >= original.createdAt,
             `updatedAt (${updated.updatedAt}) should be >= createdAt (${original.createdAt})`,
+          );
+        });
+
+        it('rejects an update of an unknown chat with ChatNotFoundError naming it', async () => {
+          await using opened = await storeCase.open();
+          const { store } = opened;
+          await store.createChat({ id: 'chat-known', userId: 'user-1' });
+
+          await assert.rejects(
+            store.updateChat('chat-unknown', () => ({ title: 'Renamed' })),
+            (error) => {
+              assert.ok(error instanceof ChatNotFoundError);
+              assert.strictEqual(error.chatId, 'chat-unknown');
+              return true;
+            },
           );
         });
 

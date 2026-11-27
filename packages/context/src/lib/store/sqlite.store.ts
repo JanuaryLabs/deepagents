@@ -25,7 +25,7 @@ import type {
   SearchResult,
   StoredChatData,
 } from './store.ts';
-import { ContextStore } from './store.ts';
+import { ChatNotFoundError, ContextStore } from './store.ts';
 
 const tables = new Declaration(statements, { rows: 'keep' });
 const search = new Declaration(searchStatements, { rows: 'replace' });
@@ -312,7 +312,7 @@ export class SqliteContextStore extends ContextStore {
       () => {
         const current = this.#getChat(chatId);
         if (!current) {
-          throw new Error(`updateChat: chat "${chatId}" not found`);
+          throw new ChatNotFoundError(chatId);
         }
 
         const updates = update(current);

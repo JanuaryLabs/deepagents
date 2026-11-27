@@ -817,6 +817,8 @@ class RedisContextStore extends ContextStore {
 Override it if your store supports transactional batch writes. See
 [Persistence](/docs/context/architecture-persistence) for the full interface and
 the concurrency requirements of `updateChat` and `updateBranchHead`.
+`updateChat` rejects a missing chat with `ChatNotFoundError`, whose `chatId`
+names it, so callers catch the class instead of reading the chat first.
 
 See the built-in implementations for reference:
 

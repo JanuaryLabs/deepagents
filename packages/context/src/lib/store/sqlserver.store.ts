@@ -24,7 +24,7 @@ import type {
   SearchResult,
   StoredChatData,
 } from './store.ts';
-import { ContextStore } from './store.ts';
+import { ChatNotFoundError, ContextStore } from './store.ts';
 
 // Row shapes as mssql (tedious) returns them for ddl.sqlserver.ts: BIGINT
 // arrives as a string (see bigintColumn), INT and COUNT() as numbers, BIT as a
@@ -431,7 +431,7 @@ export class SqlServerContextStore extends ContextStore {
       `);
       const current = storedChat.optional().parse(result.recordset[0]);
       if (!current) {
-        throw new Error(`updateChat: chat "${chatId}" not found`);
+        throw new ChatNotFoundError(chatId);
       }
 
       const updates = update(current);

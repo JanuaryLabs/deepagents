@@ -22,6 +22,17 @@ export interface ChatData {
   metadata?: Record<string, unknown>;
 }
 
+/** Thrown by updateChat when no chat has the given id. */
+export class ChatNotFoundError extends Error {
+  readonly chatId: string;
+
+  constructor(chatId: string) {
+    super(`Chat "${chatId}" not found`);
+    this.name = 'ChatNotFoundError';
+    this.chatId = chatId;
+  }
+}
+
 /**
  * Stored chat data returned from database (includes timestamps).
  */
