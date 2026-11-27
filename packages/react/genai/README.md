@@ -110,7 +110,7 @@ Providers nest. An inner provider changes only the keys it gives, the `markdown`
 </GenaiMessagesProvider>
 ```
 
-The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, keep their own English words.
+The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, ship no words of their own: `ChatComposer` fills them from the same catalog.
 
 ## Scrolling
 
