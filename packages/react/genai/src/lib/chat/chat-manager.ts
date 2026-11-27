@@ -1,5 +1,5 @@
 import type { UseChatHelpers } from '@ai-sdk/react';
-import { SerialJobExecutor, type UIMessage } from 'ai';
+import { APICallError, SerialJobExecutor, type UIMessage } from 'ai';
 
 import { isRecord } from '@deepagents/context/browser';
 
@@ -142,8 +142,10 @@ export class ChatManager {
   /**
    * Stops the answer's stream at once and asks the server to cancel the turn;
    * resolves once it answers. Rejects when the cancel fails: the turn may
-   * still run. A prefill still pending is cleared: the user chose not to send
-   * it.
+   * still run. When the server refuses the cancel, the chat resumes the turn's
+   * stream, so the answer keeps arriving, and later submissions wait for that
+   * turn to end. A prefill still pending is cleared: the user chose not to
+   * send it.
    */
   stop(): Promise<void> {
     const prefill = readPrefill();
@@ -154,9 +156,34 @@ export class ChatManager {
       clearPrefill();
     }
     const chatId = this.chat.id;
-    return this.submissions.run(async () => {
-      await Promise.all([this.chat.stop(), this.cancel(chatId)]);
+    const cancelled = Promise.withResolvers<void>();
+    void this.submissions.run(async () => {
+      const [stopped, cancel] = await Promise.allSettled([
+        this.chat.stop(),
+        this.cancel(chatId),
+      ]);
+      if (stopped.status === 'rejected') {
+        cancelled.reject(stopped.reason);
+        return;
+      }
+      if (cancel.status === 'fulfilled') {
+        cancelled.resolve();
+        return;
+      }
+      cancelled.reject(cancel.reason);
+      if (APICallError.isInstance(cancel.reason)) {
+        await this.chat.resumeStream();
+      }
     });
+    return cancelled.promise;
+  }
+
+  /**
+   * Resolves once every stop and submission asked so far has run, the turn a
+   * refused cancel resumed included.
+   */
+  settled(): Promise<void> {
+    return this.submissions.run(async () => {});
   }
 
   resetChat(prompt?: string): void {

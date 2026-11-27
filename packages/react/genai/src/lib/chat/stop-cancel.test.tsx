@@ -1,10 +1,11 @@
 import { createClock } from '@sinonjs/fake-timers';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { Msw } from '@zukhruf/testing/msw';
 import { ClockProvider } from '@zukhruf/ui';
 import { HttpResponse, http } from 'msw';
 import { useState } from 'react';
+import { Toaster, toast } from 'sonner';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -59,6 +60,53 @@ function turnStreams() {
           );
           request.signal.addEventListener('abort', () => controller.close(), {
             once: true,
+          });
+        },
+      }),
+      { headers: sse },
+    );
+  });
+}
+
+/**
+ * A turn the server keeps running: its stream sends 'Thinking' and stays open.
+ * A reconnect replays the turn from its start, as Zukhruf's stream route does,
+ * and goes on to its end once `ends` resolves.
+ */
+function resumableTurn(ends: Promise<void>) {
+  let streams = 0;
+  return http.get(`${zukhrufApi}/:sessionId/stream`, ({ request }) => {
+    streams += 1;
+    const replay = streams > 1;
+    const encoder = new TextEncoder();
+    const send = (
+      controller: ReadableStreamDefaultController<Uint8Array>,
+      chunks: readonly object[],
+    ) => controller.enqueue(encoder.encode(frames(chunks)));
+    return new HttpResponse(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          send(controller, [
+            { type: 'start', messageId: 'answer-1' },
+            { type: 'text-start', id: 't1' },
+            { type: 'text-delta', id: 't1', delta: 'Thinking' },
+            ...(replay
+              ? [{ type: 'text-delta', id: 't1', delta: ' it through.' }]
+              : []),
+          ]);
+          if (!replay) {
+            request.signal.addEventListener('abort', () => controller.close(), {
+              once: true,
+            });
+            return;
+          }
+          void ends.then(() => {
+            send(controller, [
+              { type: 'text-delta', id: 't1', delta: ' Done.' },
+              { type: 'text-end', id: 't1' },
+              { type: 'finish' },
+            ]);
+            controller.close();
           });
         },
       }),
@@ -272,28 +320,41 @@ describe('Stop on a streaming Zukhruf turn whose cancel fails (#6222)', () => {
   });
 });
 
-/** A host's composer: Stop while the answer runs, and the composer's alert. */
+/** A host's chat: its messages, Stop while the answer runs, the composer's alert, and the host's one Toaster. */
 function ComposerChat() {
   const { submit } = useAgent();
   const { status } = useAgentStatus();
+  const { messages } = useAgentMessages();
   return (
-    <ChatComposer.Provider
-      onSubmit={({ prompt, persistedPrompt }) =>
-        submit({ prompt, persistedPrompt })
-      }
-    >
-      <ChatComposer.Root>
-        <ChatComposer.Content>
-          <ChatComposer.Editor />
-          <ChatComposer.Error />
-        </ChatComposer.Content>
-        <ChatComposer.Toolbar>
-          {status === 'submitted' || status === 'streaming' ? (
-            <ChatComposer.Stop />
-          ) : null}
-        </ChatComposer.Toolbar>
-      </ChatComposer.Root>
-    </ChatComposer.Provider>
+    <>
+      <ol aria-label="messages">
+        {messages.map((message) => (
+          <li key={message.id}>
+            {message.parts
+              .map((part) => (part.type === 'text' ? part.text : ''))
+              .join('')}
+          </li>
+        ))}
+      </ol>
+      <ChatComposer.Provider
+        onSubmit={({ prompt, persistedPrompt }) =>
+          submit({ prompt, persistedPrompt })
+        }
+      >
+        <ChatComposer.Root>
+          <ChatComposer.Content>
+            <ChatComposer.Editor />
+            <ChatComposer.Error />
+          </ChatComposer.Content>
+          <ChatComposer.Toolbar>
+            {status === 'submitted' || status === 'streaming' ? (
+              <ChatComposer.Stop />
+            ) : null}
+          </ChatComposer.Toolbar>
+        </ChatComposer.Root>
+      </ChatComposer.Provider>
+      <Toaster />
+    </>
   );
 }
 
@@ -320,10 +381,16 @@ async function stopInComposer() {
   return user;
 }
 
-describe('ChatComposer.Stop (#6222)', () => {
-  it("says in the composer's alert that the answer may still run when the cancel fails", async () => {
+const stopFailed = 'Could not stop the answer. It may still be running.';
+/** Sonner's Toaster: a region labelled 'Notifications' and its hotkey. */
+const toasts = () =>
+  within(screen.getByRole('region', { name: /^Notifications/ }));
+
+describe('ChatComposer.Stop (#6222, #6291)', () => {
+  it('shows a toast, not a composer alert, when the server refuses the cancel', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
+    stack.defer(() => toast.dismiss());
     using rejections = unhandledRejections();
     await using _ = msw.intercept(
       acceptTurns(),
@@ -335,43 +402,85 @@ describe('ChatComposer.Stop (#6222)', () => {
 
     await stopInComposer();
 
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      'Could not stop the answer. It may still be running.',
-    );
-    expect(rejections.reasons).toEqual([]);
+    expect(await toasts().findByText(stopFailed)).toBeInTheDocument();
+    expect({
+      alert: screen.queryByRole('alert'),
+      rejections: rejections.reasons,
+    }).toEqual({ alert: null, rejections: [] });
   });
 
-  it('clears that alert when the user sends the next question', async () => {
+  it('shows neither a toast nor an alert, and does not reconnect, when the cancel fails at the network', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
-    using _rejections = unhandledRejections();
+    stack.defer(() => toast.dismiss());
+    using rejections = unhandledRejections();
     await using interception = msw.intercept(
       acceptTurns(),
       turnStreams(),
       http.post(`${zukhrufApi}/:sessionId/cancel`, () => HttpResponse.error()),
     );
-    const user = await stopInComposer();
-    await screen.findByRole('alert');
 
-    await user.click(
-      screen.getByRole('textbox', { name: 'Rich prompt composer' }),
-    );
-    await user.keyboard('second{Enter}');
-
+    await stopInComposer();
     await vi.waitFor(() =>
       expect(
-        interception.requests.filter(
-          (request) =>
-            request.method === 'POST' && !request.url.endsWith('/cancel'),
+        interception.requests.some((request) =>
+          request.url.endsWith('/cancel'),
         ),
-      ).toHaveLength(2),
+      ).toBe(true),
     );
-    expect(screen.queryByRole('alert')).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect({
+      toast: toasts().queryByText(stopFailed),
+      alert: screen.queryByRole('alert'),
+      rejections: rejections.reasons,
+      streamReads: interception.requests.filter((request) =>
+        request.url.endsWith('/stream'),
+      ).length,
+    }).toEqual({ toast: null, alert: null, rejections: [], streamReads: 1 });
   });
 
-  it('shows no alert once the cancel answers', async () => {
+  it('keeps showing the answer and the toast after the server refuses the cancel, and closes the toast when the turn ends', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
+    stack.defer(() => toast.dismiss());
+    using rejections = unhandledRejections();
+    const turnEnds = Promise.withResolvers<void>();
+    stack.defer(turnEnds.resolve);
+    await using _ = msw.intercept(
+      acceptTurns(),
+      resumableTurn(turnEnds.promise),
+      http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+        HttpResponse.json({ error: 'Internal Server Error' }, { status: 500 }),
+      ),
+    );
+
+    await stopInComposer();
+    await vi.waitFor(() =>
+      expect(screen.getByText('Thinking it through.')).toBeInTheDocument(),
+    );
+    // Past sonner's 4-second default lifetime.
+    await new Promise((resolve) => setTimeout(resolve, 4500));
+    expect(toasts().queryByText(stopFailed)).toBeInTheDocument();
+
+    turnEnds.resolve();
+
+    await vi.waitFor(() => expect(toasts().queryByText(stopFailed)).toBeNull());
+    expect({
+      messages: within(screen.getByRole('list', { name: 'messages' }))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+      rejections: rejections.reasons,
+    }).toEqual({
+      messages: ['first', 'Thinking it through. Done.'],
+      rejections: [],
+    });
+  }, 15_000);
+
+  it('shows no toast and no alert once the cancel answers', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+    stack.defer(() => toast.dismiss());
     const answered = Promise.withResolvers<void>();
     await using _ = msw.intercept(
       acceptTurns(),
@@ -386,7 +495,10 @@ describe('ChatComposer.Stop (#6222)', () => {
     await answered.promise;
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect({
+      toast: toasts().queryByText(stopFailed),
+      alert: screen.queryByRole('alert'),
+    }).toEqual({ toast: null, alert: null });
   });
 });
 

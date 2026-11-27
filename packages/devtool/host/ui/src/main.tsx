@@ -3,6 +3,7 @@ import { ClockProvider } from '@zukhruf/ui';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
+import { Toaster } from 'sonner';
 
 import { queryClient } from './app/runtime-data.ts';
 import { router } from './router.tsx';
@@ -16,6 +17,7 @@ createRoot(root).render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>
+      <Toaster />
     </ClockProvider>
   </StrictMode>,
 );

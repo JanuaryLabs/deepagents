@@ -157,6 +157,7 @@ async function buildHostCss(
               'vite',
               'react',
               'react-dom',
+              'sonner',
             ].map(installedVersion),
           ),
         ),

@@ -37,8 +37,10 @@ export interface AgentConfigContextValue {
   getLastUserMessageId: () => string | null;
   /**
    * Stops the answer at once and resolves once the server has cancelled its
-   * turn; rejects when the cancel fails, and the turn may still run. A submit
-   * made meanwhile is sent after it settles.
+   * turn; rejects when the cancel fails, and the turn may still run. When the
+   * server refuses the cancel, the chat resumes the turn's stream. A submit
+   * made meanwhile is sent after the cancel settles, or after that resumed
+   * turn ends.
    */
   stop: () => Promise<void>;
 }

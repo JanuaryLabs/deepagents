@@ -8,13 +8,8 @@ import {
   SquareIcon,
   XIcon,
 } from 'lucide-react';
-import {
-  type ComponentProps,
-  createContext,
-  use,
-  useMemo,
-  useState,
-} from 'react';
+import type { ComponentProps } from 'react';
+import { toast } from 'sonner';
 
 import {
   Composer,
@@ -22,7 +17,6 @@ import {
   type ComposerAttachmentsProps,
   type ComposerContentProps,
   type ComposerEditorProps,
-  type ComposerErrorProps,
   type ComposerPopupProps,
   type ComposerRootProps,
   type ComposerToolbarProps,
@@ -36,26 +30,11 @@ import {
   useAgent,
   useAgentMeta,
   useAgentStatus,
+  useChatManager,
 } from '../chat/agent-context.tsx';
 import { type GenaiTranslate, useGenaiMessages } from '../i18n/provider.tsx';
 import { ChatActionButton } from './ChatAction.tsx';
 import { SubmitButton } from './SubmitButton.tsx';
-
-/** Whether the last Stop failed to cancel the turn; the next send clears it. */
-const StopFailureContext = createContext<{
-  stopFailed: boolean;
-  setStopFailed: (stopFailed: boolean) => void;
-} | null>(null);
-
-function useStopFailure(componentName: string) {
-  const context = use(StopFailureContext);
-  if (!context) {
-    throw new Error(
-      `${componentName} must be used inside ChatComposer.Provider.`,
-    );
-  }
-  return context;
-}
 
 /** The catalog gives these words; a host still labels its own instance. */
 type InstanceWords<Props, Words extends keyof Props> = Omit<Props, Words> &
@@ -65,7 +44,6 @@ function ChatComposerProvider({
   className,
   maxExpandedTextChars,
   maxUploadBytes,
-  onSubmit,
   ...props
 }: InstanceWords<
   Omit<
@@ -90,94 +68,75 @@ function ChatComposerProvider({
   const { hasSubmitted } = useAgentMeta();
   const t = useGenaiMessages();
   const submitErrorMessage = useSubmitErrorMessage();
-  const [stopFailed, setStopFailed] = useState(false);
-  const stopFailure = useMemo(
-    () => ({ stopFailed, setStopFailed }),
-    [stopFailed],
-  );
   return (
-    <StopFailureContext value={stopFailure}>
-      <Composer.Root
-        onSubmit={(submission, context) => {
-          setStopFailed(false);
-          return onSubmit?.(submission, context);
-        }}
-        hasInteracted={hasSubmitted}
-        editorAriaLabel={t('composer.editor')}
-        submitFailedMessage={t('composer.sendFailed')}
-        submitErrorMessage={submitErrorMessage}
-        unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
-        unknownCommandMessage={(command) =>
-          t('composer.unknownCommand', command)
-        }
-        attachmentLabel={(attachment) => t('composer.attachment', attachment)}
-        pastedTextLabel={(paste) => t('composer.pastedText', paste)}
-        missingAttachmentMessage={(attachment) =>
-          t('composer.attachmentMissing', attachment)
-        }
-        expandedTextLimit={
-          maxExpandedTextChars === undefined
-            ? undefined
-            : {
-                maxChars: maxExpandedTextChars,
-                message: (counts) => t('composer.promptTooLong', counts),
-              }
-        }
-        fileSizeLimit={
-          maxUploadBytes === undefined
-            ? undefined
-            : {
-                maxBytes: maxUploadBytes,
-                message: (file) => t('composer.fileTooLarge', file),
-              }
-        }
-        className={cn(
-          'bg-background sticky bottom-0 rounded-t-2xl border-0 **:data-[slot=composer-editor]:!min-h-15',
-          className,
-        )}
-        {...props}
-      />
-    </StopFailureContext>
-  );
-}
-
-/**
- * The composer's Stop button. Stop freezes the answer at once; when the server
- * cannot cancel the turn, `ChatComposer.Error` says it may still be running.
- */
-function ChatComposerStop(
-  props: Omit<ComponentProps<typeof SubmitButton>, 'variant' | 'onClick'>,
-) {
-  const { stop } = useAgent();
-  const { setStopFailed } = useStopFailure('ChatComposer.Stop');
-  return (
-    <SubmitButton
-      type="button"
-      variant="stop"
-      onClick={() => {
-        stop().catch(() => setStopFailed(true));
-      }}
+    <Composer.Root
+      hasInteracted={hasSubmitted}
+      editorAriaLabel={t('composer.editor')}
+      submitFailedMessage={t('composer.sendFailed')}
+      submitErrorMessage={submitErrorMessage}
+      unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
+      unknownCommandMessage={(command) => t('composer.unknownCommand', command)}
+      attachmentLabel={(attachment) => t('composer.attachment', attachment)}
+      pastedTextLabel={(paste) => t('composer.pastedText', paste)}
+      missingAttachmentMessage={(attachment) =>
+        t('composer.attachmentMissing', attachment)
+      }
+      expandedTextLimit={
+        maxExpandedTextChars === undefined
+          ? undefined
+          : {
+              maxChars: maxExpandedTextChars,
+              message: (counts) => t('composer.promptTooLong', counts),
+            }
+      }
+      fileSizeLimit={
+        maxUploadBytes === undefined
+          ? undefined
+          : {
+              maxBytes: maxUploadBytes,
+              message: (file) => t('composer.fileTooLarge', file),
+            }
+      }
+      className={cn(
+        'bg-background sticky bottom-0 rounded-t-2xl border-0 **:data-[slot=composer-editor]:!min-h-15',
+        className,
+      )}
       {...props}
     />
   );
 }
 
-/** The composer's alert: a failed Stop, or else what `Composer.Error` shows. */
-function ChatComposerError({ className, ...props }: ComposerErrorProps) {
-  const { stopFailed } = useStopFailure('ChatComposer.Error');
+const stopFailedToast = 'chat-composer-stop-failed';
+
+/**
+ * The composer's Stop button. Stop freezes the answer at once; when the server
+ * refuses the cancel, the chat keeps showing the turn, and a toast in the
+ * host's sonner `<Toaster />` says the answer may still run, until the turn
+ * ends. A cancel lost at the network shows nothing.
+ */
+function ChatComposerStop(
+  props: Omit<ComponentProps<typeof SubmitButton>, 'variant' | 'onClick'>,
+) {
+  const { stop } = useAgent();
+  const manager = useChatManager();
   const t = useGenaiMessages();
-  if (!stopFailed) return <Composer.Error className={className} {...props} />;
   return (
-    <div
-      role="alert"
-      className={cn(
-        'border-primary/30 bg-primary/10 text-primary rounded-md border px-3 py-2 text-xs',
-        className,
-      )}
+    <SubmitButton
+      type="button"
+      variant="stop"
+      onClick={() => {
+        stop().catch(async (error: unknown) => {
+          if (!APICallError.isInstance(error)) return;
+          toast.error(t('composer.stopFailed'), {
+            id: stopFailedToast,
+            duration: Infinity,
+          });
+          await manager.settled();
+          toast.dismiss(stopFailedToast);
+        });
+      }}
       {...props}
-    >
-      {t('composer.stopFailed')}
-    </div>
+    />
   );
 }
 
@@ -412,7 +371,7 @@ export const ChatComposer = {
   Content: ChatComposerContent,
   Attachments: ChatComposerAttachments,
   Editor: ChatComposerEditor,
-  Error: ChatComposerError,
+  Error: Composer.Error,
   Toolbar: ChatComposerToolbar,
   CommandButton: ChatComposerCommandButton,
   AttachFiles: ChatComposerAttachFiles,

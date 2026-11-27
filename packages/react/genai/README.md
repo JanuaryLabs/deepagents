@@ -5,10 +5,10 @@ React components that render AI SDK chat flows, trajectories, tools, citations a
 ## Install
 
 ```sh
-npm i @deepagents/react-genai @zukhruf/ui @zukhruf/shadcn
+npm i @deepagents/react-genai @zukhruf/ui @zukhruf/shadcn sonner
 ```
 
-The peer dependencies are `@zukhruf/shadcn`, `@zukhruf/ui`, `react` 19 and `react-dom` 19. Install `@zukhruf/shadcn` and `@zukhruf/ui` yourself. npm does not install them for you when `legacy-peer-deps` is set.
+The peer dependencies are `@zukhruf/shadcn`, `@zukhruf/ui`, `sonner`, `react` 19 and `react-dom` 19. Install `@zukhruf/shadcn`, `@zukhruf/ui` and `sonner` yourself. npm does not install them for you when `legacy-peer-deps` is set.
 
 ## Stylesheets
 
@@ -134,7 +134,20 @@ Under `ChatBot`, the `List` of `CompactMessages` is the content of the scroller,
 
 ## Stop
 
-`ChatComposer.Stop` is the composer's Stop button; render it while the answer runs. Stop freezes the answer at once and asks the server to cancel the turn with the transport's `cancel(sessionId)`. A question asked meanwhile is sent once the cancel answers. When the cancel fails, the composer's alert, `ChatComposer.Error`, shows `composer.stopFailed`: the turn may still be running. The next send clears it.
+`ChatComposer.Stop` is the composer's Stop button; render it while the answer runs. Stop freezes the answer at once and asks the server to cancel the turn with the transport's `cancel(sessionId)`. A question asked meanwhile is sent once the cancel answers. When the server refuses the cancel, the turn is still running, so the chat keeps watching it: it reconnects to the turn's stream with the AI SDK's `resumeStream`, which the transport's `reconnectToStream` reads from `GET /session/:id/stream`, and the rest of the answer keeps arriving. A question asked meanwhile is sent once that turn ends. Stop shows `composer.stopFailed` as a sonner error toast until the resumed stream ends, when the server's turn has really ended. A cancel lost at the network shows nothing and does not reconnect: the server may have cancelled the turn, and the stream's request would most likely fail as the cancel did. `ChatComposer.Error` shows only the composer's own failures, such as a failed send.
+
+The toast renders in the host's sonner `<Toaster />`. Sonner keeps its toasts in one store per app, and every `<Toaster />` renders them, so the chat mounts none: the host mounts one, once, next to its app, and Stop's toast shows there.
+
+```tsx
+import { Toaster } from 'sonner';
+
+createRoot(container).render(
+  <ClockProvider clock={globalThis}>
+    <App />
+    <Toaster />
+  </ClockProvider>,
+);
+```
 
 ```tsx
 <ChatComposer.Toolbar>
@@ -146,7 +159,7 @@ Under `ChatBot`, the `List` of `CompactMessages` is the content of the scroller,
 </ChatComposer.Toolbar>
 ```
 
-`useAgent().stop()` does the same and returns a promise: it resolves once the server has cancelled the turn and rejects when the cancel fails. A refused cancel rejects with the AI SDK's `APICallError`, and a network failure with its own error. A host with its own Stop button must catch that rejection.
+`useAgent().stop()` does the same, resuming a turn whose cancel the server refused, and returns a promise: it resolves once the server has cancelled the turn and rejects when the cancel fails. A refused cancel rejects with the AI SDK's `APICallError`, and a network failure with its own error. A host with its own Stop button must catch that rejection, and shows its own words for it: `ChatComposer.Stop`'s toast comes only from `ChatComposer.Stop`.
 
 Only Stop cancels the turn. Leaving or unmounting a chat whose answer is streaming stops the stream on the page, and the answer finishes on the server: the history shows it when the user comes back. A transport given to `AgentProvider` therefore has `cancel` beside `uploadFile`.
 
