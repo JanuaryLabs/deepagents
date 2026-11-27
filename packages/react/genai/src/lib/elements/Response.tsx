@@ -44,7 +44,7 @@ export const Response = memo(({ className, ...props }: ResponseProps) => (
   <StreamdownErrorBoundary>
     <TablePanelStreamdown
       className={cn(
-        'size-full space-y-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
+        'flex size-full flex-col gap-2 space-y-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         className,
       )}
       dir="auto"
