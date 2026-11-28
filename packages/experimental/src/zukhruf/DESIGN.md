@@ -469,7 +469,7 @@ work (long-running executor process):
     → engine.set(user(input), skills, assistant placeholder id=streamId); save()
     → monitor cancellation → chat({ toolsContext }) → AWAIT persist(preclaimed)
                                                     // worker holds the job for the whole turn
-    → persist detected a cancel? record <turn_aborted> after the partial answer
+    → persist detected a cancel? settle answered approvals output-error, then <turn_aborted> after the partial answer
     → child completed or failed? idempotent queue-only FINAL_ANSWER to its direct parent  // cancelled: none
     → mailbox.endTurn(conversation, streamId)     // stale attempts cannot close a successor
 
