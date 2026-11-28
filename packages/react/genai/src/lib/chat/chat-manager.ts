@@ -54,6 +54,8 @@ export class ChatManager {
    * Stop is sent once the server has answered the cancel.
    */
   private readonly submissions = new SerialJobExecutor();
+  /** Only the latest Stop resumes a refused turn, and `settled` waits for it. */
+  private stopsPressed = 0;
 
   onResetChat: (chatId: string) => void;
 
@@ -140,8 +142,9 @@ export class ChatManager {
   }
 
   /**
-   * Stops the answer's stream at once and asks the server to cancel the turn;
-   * resolves once it answers. Rejects when the cancel fails: the turn may
+   * Stops the answer's stream and asks the server to cancel the turn, both at
+   * once, also while an earlier refused Stop's turn still streams; resolves
+   * once the server answers. Rejects when the cancel fails: the turn may
    * still run. When the server refuses the cancel, the chat resumes the turn's
    * stream, so the answer keeps arriving, and later submissions wait for that
    * turn to end. A prefill still pending is cleared: the user chose not to
@@ -155,13 +158,14 @@ export class ChatManager {
     ) {
       clearPrefill();
     }
-    const chatId = this.chat.id;
+    const press = ++this.stopsPressed;
+    const outcome = Promise.allSettled([
+      this.chat.stop(),
+      this.cancel(this.chat.id),
+    ]);
     const cancelled = Promise.withResolvers<void>();
     void this.submissions.run(async () => {
-      const [stopped, cancel] = await Promise.allSettled([
-        this.chat.stop(),
-        this.cancel(chatId),
-      ]);
+      const [stopped, cancel] = await outcome;
       if (stopped.status === 'rejected') {
         cancelled.reject(stopped.reason);
         return;
@@ -171,7 +175,10 @@ export class ChatManager {
         return;
       }
       cancelled.reject(cancel.reason);
-      if (APICallError.isInstance(cancel.reason)) {
+      if (
+        APICallError.isInstance(cancel.reason) &&
+        this.stopsPressed === press
+      ) {
         await this.chat.resumeStream();
       }
     });
@@ -180,10 +187,14 @@ export class ChatManager {
 
   /**
    * Resolves once every stop and submission asked so far has run, the turn a
-   * refused cancel resumed included.
+   * refused cancel resumed included, and so has every Stop pressed meanwhile.
    */
-  settled(): Promise<void> {
-    return this.submissions.run(async () => {});
+  async settled(): Promise<void> {
+    let stopsPressed: number;
+    do {
+      stopsPressed = this.stopsPressed;
+      await this.submissions.run(async () => {});
+    } while (stopsPressed !== this.stopsPressed);
   }
 
   resetChat(
