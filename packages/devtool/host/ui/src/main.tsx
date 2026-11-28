@@ -1,9 +1,9 @@
 import { QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from '@zukhruf/shadcn';
 import { ClockProvider } from '@zukhruf/ui';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
-import { Toaster } from 'sonner';
 
 import { queryClient } from './app/runtime-data.ts';
 import { router } from './router.tsx';
@@ -15,9 +15,10 @@ createRoot(root).render(
   <StrictMode>
     <ClockProvider clock={globalThis}>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
+        <Toaster>
+          <RouterProvider router={router} />
+        </Toaster>
       </QueryClientProvider>
-      <Toaster />
     </ClockProvider>
   </StrictMode>,
 );

@@ -5,10 +5,10 @@ React components that render AI SDK chat flows, trajectories, tools, citations a
 ## Install
 
 ```sh
-npm i @deepagents/react-genai @zukhruf/ui @zukhruf/shadcn sonner
+npm i @deepagents/react-genai @zukhruf/ui @zukhruf/shadcn
 ```
 
-The peer dependencies are `@zukhruf/shadcn`, `@zukhruf/ui`, `sonner`, `react` 19 and `react-dom` 19. Install `@zukhruf/shadcn`, `@zukhruf/ui` and `sonner` yourself. npm does not install them for you when `legacy-peer-deps` is set.
+The peer dependencies are `@zukhruf/shadcn`, `@zukhruf/ui`, `react` 19 and `react-dom` 19. Install `@zukhruf/shadcn` and `@zukhruf/ui` yourself. npm does not install them for you when `legacy-peer-deps` is set.
 
 ## Stylesheets
 
@@ -134,17 +134,18 @@ Under `ChatBot`, the `List` of `CompactMessages` is the content of the scroller,
 
 ## Stop
 
-`ChatComposer.Stop` is the composer's Stop button; render it while the answer runs. Stop freezes the answer at once and asks the server to cancel the turn with the transport's `cancel(sessionId)`. A question asked meanwhile is sent once the cancel answers. When the server refuses the cancel, the turn is still running, so the chat keeps watching it: it reconnects to the turn's stream with the AI SDK's `resumeStream`, which the transport's `reconnectToStream` reads from `GET /session/:id/stream`, and the rest of the answer keeps arriving. A question asked meanwhile is sent once that turn ends. Stop shows `composer.stopFailed` as a sonner error toast until the resumed stream ends, when the server's turn has really ended. A cancel lost at the network shows nothing and does not reconnect: the server may have cancelled the turn, and the stream's request would most likely fail as the cancel did. `ChatComposer.Error` shows only the composer's own failures, such as a failed send.
+`ChatComposer.Stop` is the composer's Stop button; render it while the answer runs. Stop freezes the answer at once and asks the server to cancel the turn with the transport's `cancel(sessionId)`. A question asked meanwhile is sent once the cancel answers. When the server refuses the cancel, the turn is still running, so the chat keeps watching it: it reconnects to the turn's stream with the AI SDK's `resumeStream`, which the transport's `reconnectToStream` reads from `GET /session/:id/stream`, and the rest of the answer keeps arriving. A question asked meanwhile is sent once that turn ends. Stop shows `composer.stopFailed` as an error toast until the resumed stream ends, when the server's turn has really ended. A cancel lost at the network shows nothing and does not reconnect: the server may have cancelled the turn, and the stream's request would most likely fail as the cancel did. `ChatComposer.Error` shows only the composer's own failures, such as a failed send.
 
-The toast renders in the host's sonner `<Toaster />`. Sonner keeps its toasts in one store per app, and every `<Toaster />` renders them, so the chat mounts none: the host mounts one, once, next to its app, and Stop's toast shows there.
+The toast renders in the host's `<Toaster>` from `@zukhruf/shadcn`, the Base UI toast the host's own toasts use, so they share one stack. Stop raises it through the kit's `toast` manager, the one `<Toaster>` renders by default, so the chat mounts none: the host wraps its app in one `<Toaster>`, once, and gives it no `toastManager` of its own. Each chat shows at most one such toast.
 
 ```tsx
-import { Toaster } from 'sonner';
+import { Toaster } from '@zukhruf/shadcn';
 
 createRoot(container).render(
   <ClockProvider clock={globalThis}>
-    <App />
-    <Toaster />
+    <Toaster>
+      <App />
+    </Toaster>
   </ClockProvider>,
 );
 ```

@@ -1,3 +1,4 @@
+import { toast } from '@zukhruf/shadcn';
 import { APICallError } from 'ai';
 import { cn } from 'cn';
 import {
@@ -9,7 +10,6 @@ import {
   XIcon,
 } from 'lucide-react';
 import type { ComponentProps } from 'react';
-import { toast } from 'sonner';
 
 import {
   Composer,
@@ -110,18 +110,16 @@ function ChatComposerProvider({
   );
 }
 
-const stopFailedToast = 'chat-composer-stop-failed';
-
 /**
  * The composer's Stop button. Stop freezes the answer at once; when the server
  * refuses the cancel, the chat keeps showing the turn, and a toast in the
- * host's sonner `<Toaster />` says the answer may still run, until the turn
- * ends. A cancel lost at the network shows nothing.
+ * host's @zukhruf/shadcn `<Toaster>` says the answer may still run, until the
+ * turn ends. A cancel lost at the network shows nothing.
  */
 function ChatComposerStop(
   props: Omit<ComponentProps<typeof SubmitButton>, 'variant' | 'onClick'>,
 ) {
-  const { stop } = useAgent();
+  const { chatId, stop } = useAgent();
   const manager = useChatManager();
   const t = useGenaiMessages();
   return (
@@ -131,12 +129,14 @@ function ChatComposerStop(
       onClick={() => {
         stop().catch(async (error: unknown) => {
           if (!APICallError.isInstance(error)) return;
-          toast.error(t('composer.stopFailed'), {
-            id: stopFailedToast,
-            duration: Infinity,
+          const id = toast.add({
+            id: `chat-composer-stop-failed:${chatId}`,
+            type: 'error',
+            title: t('composer.stopFailed'),
+            timeout: 0,
           });
           await manager.settled();
-          toast.dismiss(stopFailedToast);
+          toast.close(id);
         });
       }}
       {...props}
