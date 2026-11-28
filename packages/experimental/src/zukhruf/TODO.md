@@ -71,8 +71,9 @@
 - [x] Keep the assistant message as the permanent approval decision record.
 - [x] Suppress child terminal projection while an approval remains unresolved, report Codex's
       model-facing `running`, and prove exactly one post-continuation `FINAL_ANSWER`.
-- [x] A failed or cancelled continuation overrides approval-pause projection: parents receive the
-      terminal result and `list_agents` reports `errored` or `interrupted`, never stale `running`.
+- [x] A failed or cancelled continuation overrides approval-pause projection: a failed one reaches
+      the parent at once and a cancelled one projects nothing, and `list_agents` reports `errored` or
+      `interrupted`, never stale `running`.
 - [x] A failed or cancelled continuation settles approved `approval-responded` parts to
       `output-error`, preserves denied siblings as `output-denied`, and resumes parked turns. The
       same reconciliation runs for normal settlement, orphan cleanup, and already-terminal replay,
@@ -111,8 +112,8 @@
       needed.
 - [x] Model-facing independent-thread tools: direct AI SDK `spawn_agent`, `send_message`,
       `followup_task`, and `list_agents` tools receive runtime state through tool context;
-      every terminal non-root turn forwards idempotent queue-only `FINAL_ANSWER` mail to its direct
-      parent with completed, failed, or cancelled status.
+      every completed or failed non-root turn forwards idempotent queue-only `FINAL_ANSWER` mail to
+      its direct parent; a cancelled child, queued or running, sends its parent nothing, as in Codex.
 - [x] `list_agents` derives the current tree from ContextStore metadata, persisted stream state, and
       required TurnQueue activity, supports relative/absolute path-prefix filtering, and reports
       canonical paths, queued follow-ups, and completion text without adding a registry. Its strict
@@ -123,8 +124,8 @@
       aborts with its turn. Live steer is intentionally absent because Zukhruf has no in-turn steer
       channel.
 - [x] Model-facing `interrupt_agent` resolves relative/canonical paths, rejects root/self, cancels
-      running or oldest queued work across runtime instances, projects one terminal parent message,
-      returns the previous status, and leaves the target reusable. Terminal and approval-paused
+      running or oldest queued work across runtime instances, sends the parent no `FINAL_ANSWER`
+      (only the child's completion receipt is recorded), returns the previous status, and leaves the target reusable. Terminal and approval-paused
       targets no-op; no broader close/resume/shutdown lifecycle was added.
 - [x] Port Codex host configuration for separate root/subagent guidance, spawn usage text,
       validated OpenAI Responses tool namespaces, and wait bounds. `fork_turns` is optional
