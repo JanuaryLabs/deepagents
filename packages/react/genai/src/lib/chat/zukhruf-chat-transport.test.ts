@@ -353,30 +353,56 @@ it('accepts video and audio upload receipts', async () => {
   expect(returned).toEqual(receipt);
 });
 
-it('rejects a semantically invalid upload receipt', async () => {
+it("rejects a semantically invalid upload receipt with the AI SDK's APICallError, carrying the status and the body", async () => {
+  const receipt = {
+    path: '/workspace/.uploads/file',
+    name: 'shot.svg',
+    mediaType: 'image/svg+xml',
+    size: -1,
+    url: 'not a URL',
+  };
   const transport = new ZukhrufChatTransport({
     api,
-    fetch: async () =>
-      Response.json(
-        {
-          path: '/workspace/.uploads/file',
-          name: 'shot.svg',
-          mediaType: 'image/svg+xml',
-          size: -1,
-          url: 'not a URL',
-        },
-        { status: 201 },
-      ),
+    fetch: async () => Response.json(receipt, { status: 201 }),
   });
 
-  await expect(
-    transport.uploadFile(
+  const error = await transport
+    .uploadFile(
       sessionId,
       new File([new Uint8Array([0xff, 0xd8])], 'shot.jpg', {
         type: 'image/jpeg',
       }),
-    ),
-  ).rejects.toThrow('invalid upload response');
+    )
+    .catch((error: unknown) => error);
+
+  expect(APICallError.isInstance(error)).toBe(true);
+  expect(error).toMatchObject({
+    statusCode: 201,
+    responseBody: JSON.stringify(receipt),
+  });
+});
+
+it("rejects an upload receipt that is not JSON with the AI SDK's APICallError", async () => {
+  const transport = new ZukhrufChatTransport({
+    api,
+    fetch: async () =>
+      new Response('<html>proxy error</html>', { status: 201 }),
+  });
+
+  const error = await transport
+    .uploadFile(
+      sessionId,
+      new File([new Uint8Array([0xff, 0xd8])], 'shot.jpg', {
+        type: 'image/jpeg',
+      }),
+    )
+    .catch((error: unknown) => error);
+
+  expect(APICallError.isInstance(error)).toBe(true);
+  expect(error).toMatchObject({
+    statusCode: 201,
+    responseBody: '<html>proxy error</html>',
+  });
 });
 
 it("rejects a refused upload with the AI SDK's APICallError, carrying the status and the server's body", async () => {

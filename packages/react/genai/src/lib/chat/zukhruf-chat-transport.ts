@@ -1,3 +1,4 @@
+import { createJsonResponseHandler } from '@ai-sdk/provider-utils';
 import { APICallError, DefaultChatTransport } from 'ai';
 import { z } from 'zod';
 
@@ -134,11 +135,12 @@ export class ZukhrufChatTransport extends DefaultChatTransport<AgentUIMessage> {
         responseBody,
       });
     }
-    const receipt = uploadReceiptSchema.safeParse(await response.json());
-    if (!receipt.success) {
-      throw new Error('Zukhruf returned an invalid upload response');
-    }
-    return receipt.data;
+    const { value } = await createJsonResponseHandler(uploadReceiptSchema)({
+      url,
+      requestBodyValues: undefined,
+      response,
+    });
+    return value;
   }
 
   /**
