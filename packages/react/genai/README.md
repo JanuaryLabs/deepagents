@@ -196,6 +196,25 @@ An entry page that sends from react-input's `Composer.Root` gets the words `Chat
 <Composer.Root submitErrorMessage={useSubmitErrorMessage()} onSubmit={ask} {...words}>
 ```
 
+## Citations
+
+`CitationPill` draws a source's number and opens its card on hover, tap and keyboard. The host's `children` show in the card. `ref` is the pill's button. A host panel opened from the card gives it as the panel's `finalFocus`, so focus goes back to the pill when the panel closes, also when the card opened on hover and the pill never had focus. To close the card when its action opens the panel, render the action as Base UI's `Popover.Close`.
+
+```tsx
+import { Popover } from '@base-ui/react/popover';
+
+const pill = useRef<HTMLButtonElement>(null);
+
+<CitationPill source={source} index={index} ref={pill}>
+  <Popover.Close render={<button onClick={() => setPanel(true)} />}>
+    Show source
+  </Popover.Close>
+</CitationPill>
+<Sheet open={panel} onOpenChange={setPanel}>
+  <SheetContent finalFocus={pill}>…</SheetContent>
+</Sheet>
+```
+
 ## One copy of @zukhruf/ui
 
 The host and this package must use the same copy of `@zukhruf/ui`. Each copy has its own React context. A `ClockProvider` of one copy does not reach a `TheButton` of the other copy, and the button throws `No clock set, use ClockProvider to set one`. For this reason `@zukhruf/ui` is a peer dependency. npm refuses an install when the version of the host is out of the range.
