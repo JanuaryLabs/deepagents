@@ -252,8 +252,11 @@ as Codex does: a question with nothing running or queued ahead of it is kept,
 followed by the `<turn_aborted>` marker, even when it had not started; a turn
 queued behind another is dropped, its text left to the client that sent it;
 a running turn keeps its question and partial answer, then the marker. A
-cancel answers once the turn has exited, after at most 10 s, and archive
-waits as long for all of its turns; it parks nothing.
+cancel waits up to 10 s for the turn to exit: it answers 204 when the turn
+exited, or 202 Accepted with `{ sessionId, turnId }` and
+`Location: <mount>/session/:sessionId` when it still runs, and the session's
+status goes idle once it exits. Archive waits as long for all of its turns;
+it parks nothing.
 `GET /session/:sessionId` reads the session as Codex's `thread/read` does:
 `{ sessionId, messages, turns, status, archivedAt? }`, which in process is
 `runtime.observe(conversation).read()`. `messages` is the chain without the

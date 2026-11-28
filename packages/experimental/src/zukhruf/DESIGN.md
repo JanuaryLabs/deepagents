@@ -740,8 +740,9 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   Codex's `interrupt_agent` aborts through the same `interrupt_task` as a user's interrupt
   (`core/src/session/sampling_interrupt.rs`, `core/src/tasks/mod.rs`), so a spawned task that has
   not started is recorded with the `<turn_aborted>` marker. Like Codex's `send_op`, it does not
-  wait for a running turn to exit. It then records the child's `completion` receipt and sends the
-  parent no `FINAL_ANSWER`, as Codex's `interrupt_agent` sends none
+  wait for a running turn to exit. A queued child's `completion` receipt commits in the same
+  admission that cancels its turn (`TurnInterruption`), and a running child's worker records it on
+  exit. The parent gets no `FINAL_ANSWER`, as Codex's `interrupt_agent` sends none
   (`core/src/tools/handlers/multi_agents_v2/interrupt_agent.rs`).
   Active work retains its strict-FIFO key until its handler exits; local handlers are signalled by
   the adapter and remote handlers observe the durable stream cancellation.
@@ -1584,7 +1585,9 @@ work({concurrency?}) → AsyncDisposable }`.
   contribute task/run changes after commit without browser polling.
 - **Child activity and progress** — successful control-plane spawn, message, follow-up, and
   interrupt operations record activity; the shared terminal projection records completion,
-  failure, or cancellation after excluding approval/input pauses. Receipts live in reserved
+  failure, or cancellation after excluding approval/input pauses, except a queued child's
+  cancellation, which `TurnInterruption` records in its cancel admission (the receipt shape's
+  second copy, `docs/copied-completion-receipt.md`, #6321). Receipts live in reserved
   `zukhruf.childActivities` context metadata, with at most one receipt per kind per child and no
   message content. Deterministic spawn/interrupt/completion IDs deduplicate retries. Mailbox
   storage remains transport-only. Conversation changes carry an optional `child` projection
